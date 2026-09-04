@@ -1,5 +1,11 @@
 # Claude Workflow — BlueBubbles
 
+## Getting Started
+Run the `quickstart` skill (`.claude/skills/quickstart/SKILL.md`) at the start of a
+new task — it covers PATH setup for `dart`/`flutter`, how to run and live-verify a
+change (including the web-server hot-restart workflow and Claude-in-Chrome tool
+setup), and the git/fork workflow, without re-deriving them each session.
+
 ## Rules
 Detailed coding standards live in `.claude/rules/`:
 - `frontend.md` — widget patterns, state, theming, naming
