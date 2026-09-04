@@ -229,6 +229,76 @@ bug. Note the very first sync (fired by `ContactServiceV2.init()` before chats l
 still logs 0 affected handles, as expected — it's the *second* sync, triggered from
 `chats_service.dart` after handles exist, that succeeds.
 
+### Contact photos (avatars) not loading on web — fixed and verified live
+(Follow-up to the contacts fix above — names/matching worked, but every avatar still
+showed initials or a gradient circle, never a real photo.)
+
+Root cause was four independent, deliberate gaps stacked on top of each other — not
+one bug, three "we'll deal with this later" decisions plus one that was just never
+built:
+1. `ContactV2Actions._syncContactsToHandlesInternal` called
+   `HttpSvc.contact.fetchAll(withAvatars: !kIsWeb)` — on web this evaluates to
+   `false`, so the server was never even asked for avatar data
+   (`extraProperties=avatar` was omitted from the request entirely).
+2. Even with avatar data, `_saveContactAvatar` writes to disk via
+   `FilesystemSvc.appDocDir`, which is never initialized on web — the old code
+   explicitly skipped this and recorded `avatarPaths[contactId] = null`.
+3. `ContactV2` (both `database/io/contact_v2.dart` and, critically, the *actual* web
+   model at `models/html/contact_v2.dart` — see the note below) only had an
+   `avatarPath` file-path field, no field to hold decoded bytes in memory. There was
+   nowhere to put a downloaded avatar even if one had been fetched.
+4. `ContactAvatarWidget` unconditionally called `Image.file(File(contactV2Avatar))`
+   with no `kIsWeb` branch — even a `path`-shaped placeholder wouldn't have rendered.
+
+**Important gotcha hit while investigating**: `lib/database/io/contact_v2.dart` is
+*not* the class used on web, despite `io/CLAUDE.md` saying io/ entities are "not used
+on web." `lib/database/models.dart` conditionally exports
+`models/html/contact_v2.dart` instead on `dart.library.html`. Anyone touching
+`ContactV2` needs to check both files — they're meant to mirror each other's public
+API so shared widget code compiles against either.
+
+Fix (mirrors the `Attachment.bytes` in-memory-on-web pattern already established for
+attachment downloads):
+- `lib/models/html/contact_v2.dart` — added `Uint8List? avatarBytes` field (the real
+  fix; this is the class actually compiled in on web).
+- `lib/database/io/contact_v2.dart` — added the same field as `@Transient()` (always
+  null on native/desktop, which still uses `avatarPath`) purely so shared widget code
+  referencing `contactV2.avatarBytes` compiles on both platforms without a `kIsWeb`
+  cast at every call site.
+- `lib/services/backend/actions/contact_v2_actions.dart` — `fetchAll(withAvatars:
+  true)` unconditionally now; on web, decodes the base64 `avatar` field into
+  `avatarBytes` directly on the in-memory `ContactV2` instead of skipping it.
+- `lib/app/state/handle_state.dart` — added `avatarBytes` as an `Rxn<Uint8List>`
+  alongside the existing `avatarPath` `RxnString`, resolved from
+  `handle.contactsV2.firstOrNull?.avatarBytes` (mirrors `_resolveAvatarPath`'s
+  structure, inverted: null on native, populated on web). Wired into
+  `updateFromHandle`, `redactAvatars`/`unredactAvatars` alongside the existing path
+  handling.
+- `lib/app/components/avatars/contact_avatar_widget.dart` — added a `cachedAvatarBytes`
+  read (same `_handleState ?? contactV2` fallback as `cachedAvatarPath`) and a new
+  `Image.memory(...)` branch, inserted between the existing `Image.file` branch and
+  the initials fallback. On native `cachedAvatarBytes` is always null so this branch
+  never triggers; on web `cachedAvatarPath` is always null so it falls through to this
+  one whenever bytes are available.
+- `lib/app/components/avatars/contact_avatar_group_widget.dart` — the "show contacts
+  with photos first" sort heuristic (`_sortedHandles`) only checked `avatarPath`;
+  updated to also check `avatarBytes` so it doesn't misorder group avatars on web.
+
+**Verified live**: after the fix, the `/api/v1/contact` request now includes
+`extraProperties=avatar` and returns in ~70-90ms for 474 contacts (no noticeable
+slowdown in this account). Real photos now render for contacts with one (confirmed
+visually: "Sam Morris", "Vickie Woodard (Weber)", and group avatars like "Adam &
++16087990697" showing a real photo for the participant who has one and initials for
+the one who doesn't) — no console errors from the base64 decode or `Image.memory`
+render path.
+
+**Known remaining gap, not fixed (minor, cosmetic)**: `conversation_list.dart`'s
+avatar precache warm-up (`precacheImage(ResizeImage(FileImage(File(path)), ...))`)
+only handles `avatarPath` and is a no-op on web — chat tiles scrolling into view may
+show a brief cold-decode flash before the `Image.memory` frame lands, where native
+wouldn't. Not fixed since it's a minor perf/polish detail, not a "photos don't load"
+bug.
+
 ### Link-preview CORS image errors — cosmetic, no fix needed
 Browser console showed CORS-blocked image loads for `share.1password.com` Open Graph
 preview images (`net::ERR_FAILED` in `_network_image_web.dart`). Confirmed via
@@ -247,6 +317,7 @@ visually, not just noisy in the console.
    exercised against a real image in the browser this session. Get a real attached photo into
    a test chat (see notes above on why the file picker couldn't be automated) and confirm the
    `Image.memory` render actually works end to end before calling this fully verified.
-4. New: the scroll/search/"loading surrounding context" hangs noted above — likely one shared
+4. ~~Contact photos (avatars) not loading.~~ Done, verified live.
+5. New: the scroll/search/"loading surrounding context" hangs noted above — likely one shared
    root cause (an unguarded `Database` call on web whose `LateInitializationError` is silently
    swallowed). Not part of today's attachment work; worth its own session.

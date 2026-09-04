@@ -67,7 +67,11 @@ class ContactAvatarGroupWidget extends StatelessWidget {
     // would run a lazy ToMany DB query per handle on every rebuild, and the
     // registry value is also what the child ContactAvatarWidgets display.
     final hasAvatar = {
-      for (final h in handles) h: HandleSvc.getOrCreateHandleState(h).avatarPath.value != null,
+      for (final h in handles)
+        h: () {
+          final hs = HandleSvc.getOrCreateHandleState(h);
+          return hs.avatarPath.value != null || hs.avatarBytes.value != null;
+        }(),
     };
     sorted.sort((a, b) {
       final avatarA = hasAvatar[a] ?? false;

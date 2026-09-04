@@ -47,7 +47,13 @@ class HandleState {
 
   /// Local file path to the contact's avatar image, if available.
   /// Null when no avatar is set or when [generateFakeAvatars] is active.
+  /// Always null on web — see [avatarBytes].
   final RxnString avatarPath;
+
+  /// In-memory avatar image bytes, for web only (no filesystem to cache a path
+  /// to there). Always null on native/desktop — see [avatarPath] instead.
+  /// Null when no avatar is set or when [generateFakeAvatars] is active.
+  final Rxn<Uint8List> avatarBytes;
 
   /// Hex-string color override for avatar gradient and colorful bubbles.
   /// Null means the default address-derived gradient is used.
@@ -74,6 +80,7 @@ class HandleState {
         reactionDisplayName = RxnString(handle.reactionDisplayName),
         initials = RxnString(handle.initials),
         avatarPath = RxnString(_resolveAvatarPath(handle)),
+        avatarBytes = Rxn<Uint8List>(_resolveAvatarBytes(handle)),
         color = RxnString(handle.color),
         defaultEmail = RxnString(handle.defaultEmail),
         defaultPhone = RxnString(handle.defaultPhone),
@@ -92,6 +99,11 @@ class HandleState {
   static String? _resolveAvatarPath(Handle h) {
     if (kIsWeb) return null;
     return h.contactsV2.firstOrNull?.avatarPath;
+  }
+
+  static Uint8List? _resolveAvatarBytes(Handle h) {
+    if (!kIsWeb) return null;
+    return h.contactsV2.firstOrNull?.avatarBytes;
   }
 
   // ========== Internal State Update Methods ==========
@@ -115,6 +127,7 @@ class HandleState {
     _recomputeReactionDisplayName();
     updateInitialsInternal(handle.initials);
     updateAvatarPathInternal(_resolveAvatarPath(handle));
+    updateAvatarBytesInternal(_resolveAvatarBytes(handle));
     updateColorInternal(handle.color);
     updateDefaultEmailInternal(handle.defaultEmail);
     updateDefaultPhoneInternal(handle.defaultPhone);
@@ -140,6 +153,10 @@ class HandleState {
 
   void updateAvatarPathInternal(String? value) {
     if (avatarPath.value != value) avatarPath.value = value;
+  }
+
+  void updateAvatarBytesInternal(Uint8List? value) {
+    if (avatarBytes.value != value) avatarBytes.value = value;
   }
 
   void updateColorInternal(String? value) {
@@ -193,16 +210,18 @@ class HandleState {
     updateFormattedAddressInternal(handle.formattedAddress ?? handle.address);
   }
 
-  /// Redact avatar: clears avatarPath so the widget falls back to a placeholder.
+  /// Redact avatar: clears avatarPath/avatarBytes so the widget falls back to a placeholder.
   void redactAvatars() {
     if (!SettingsSvc.settings.redactedMode.value) return;
     if (!SettingsSvc.settings.generateFakeAvatars.value) return;
     updateAvatarPathInternal(null);
+    updateAvatarBytesInternal(null);
   }
 
   /// Restore avatar to the real value.
   void unredactAvatars() {
     updateAvatarPathInternal(_resolveAvatarPath(handle));
+    updateAvatarBytesInternal(_resolveAvatarBytes(handle));
   }
 
   // ========== Reaction Name Visibility ==========

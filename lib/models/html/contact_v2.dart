@@ -54,6 +54,7 @@ class ContactV2 {
     required this.nativeContactId,
     this.isNative = false,
     this.avatarPath,
+    this.avatarBytes,
     this.addresses = const [],
     this.nickname,
     this.firstName,
@@ -69,6 +70,11 @@ class ContactV2 {
   String nativeContactId;
   bool isNative;
   String? avatarPath;
+
+  /// In-memory avatar bytes. Web has no filesystem to cache avatars to (unlike
+  /// native/desktop, which write to disk and use [avatarPath]), so the decoded
+  /// image is held here for the lifetime of the session instead.
+  Uint8List? avatarBytes;
   List<String> addresses;
   String? nickname;
   String? firstName;
@@ -113,7 +119,7 @@ class ContactV2 {
     return (first + last).isEmpty ? null : (first + last).toUpperCase();
   }
 
-  Future<Uint8List?> loadAvatar() async => null;
+  Future<Uint8List?> loadAvatar() async => avatarBytes;
 
   static String normalizePhoneNumber(String phone) {
     return phone.replaceAll(RegExp(r'[^\d+]'), '');

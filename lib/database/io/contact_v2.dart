@@ -86,6 +86,13 @@ class ContactV2 {
   /// Local file path to the avatar image (if any)
   String? avatarPath;
 
+  /// In-memory avatar bytes. Always null on native/desktop — avatars are cached to
+  /// disk here and read via [avatarPath] instead. Exists only so shared widget code
+  /// (e.g. `ContactAvatarWidget`) can reference the same field name as the web
+  /// counterpart (`models/html/contact_v2.dart`), which has no filesystem to cache to.
+  @Transient()
+  Uint8List? avatarBytes;
+
   /// Normalized list of phone numbers and emails
   /// Phone numbers should be stripped of non-digits
   /// Emails should be lowercased

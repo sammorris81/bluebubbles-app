@@ -287,9 +287,7 @@ class ContactV2Actions {
         // Browsers have no device contact book — flutter_contacts (the
         // `else` branch below) doesn't support web at all and crashes there.
         Logger.info('[ContactV2] Starting contact fetch from server...');
-        // Web can't cache avatars to disk (see the kIsWeb branch below), so don't
-        // pay to download a base64 image per contact just to throw it away.
-        final response = await HttpSvc.contact.fetchAll(withAvatars: !kIsWeb);
+        final response = await HttpSvc.contact.fetchAll(withAvatars: true);
 
         if (response.statusCode == 200 && !isNullOrEmpty(response.data['data'])) {
           for (Map<String, dynamic> map in response.data['data']) {
@@ -302,12 +300,17 @@ class ContactV2Actions {
                 .toList();
 
             final contactId = (map['id'] ?? displayName).toString();
-            // Avatars are cached to disk, which browsers have no access to —
-            // `FilesystemSvc.appDocDir` is never initialized on web, so every
-            // save throws and logs an error. Skip it rather than spamming one
-            // failure per contact for a path web can't display anyway.
+            Uint8List? avatarBytes;
+            // Avatars would normally be cached to disk — `FilesystemSvc.appDocDir`
+            // is never initialized on web, so every save there would throw. Hold
+            // the decoded bytes in memory instead (see ContactV2.avatarBytes).
             if (kIsWeb) {
-              // No avatar on web; record the absence so existing paths aren't kept.
+              if (!isNullOrEmpty(map['avatar'])) {
+                try {
+                  avatarBytes = base64Decode(map['avatar'].toString());
+                } catch (_) {}
+              }
+              // No avatarPath on web; record the absence so existing paths aren't kept.
               avatarPaths[contactId] = null;
             } else if (!isNullOrEmpty(map['avatar'])) {
               try {
@@ -327,6 +330,7 @@ class ContactV2Actions {
               firstName: map['firstName']?.toString(),
               lastName: map['lastName']?.toString(),
             );
+            nc.avatarBytes = avatarBytes;
             nc.phoneNumbers = phones;
             nc.emailAddresses = emails;
             networkContacts.add(nc);

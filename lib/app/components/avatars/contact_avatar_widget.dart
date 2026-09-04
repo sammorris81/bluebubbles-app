@@ -179,6 +179,7 @@ class _ContactAvatarWidgetState extends State<ContactAvatarWidget> with ThemeHel
           ? [HexColor(colorStr).lightenAmount(0.02), HexColor(colorStr)]
           : toColorGradient(widget.handle?.address);
       final cachedAvatarPath = _handleState?.avatarPath.value ?? contactV2?.avatarPath;
+      final cachedAvatarBytes = _handleState?.avatarBytes.value ?? contactV2?.avatarBytes;
       final cachedInitials = _handleState?.initials.value ?? contactV2?.initials ?? widget.handle?.initials;
       final hideContactInfo = SettingsSvc.settings.redactedMode.value && SettingsSvc.settings.hideContactInfo.value;
       final genAvatars = SettingsSvc.settings.redactedMode.value && SettingsSvc.settings.generateFakeAvatars.value;
@@ -280,7 +281,28 @@ class _ContactAvatarWidgetState extends State<ContactAvatarWidget> with ThemeHel
                     },
                   ),
                 );
-              } else if (isNullOrEmpty(contactV2Avatar) || hideContactInfo || genAvatars) {
+              } else if (!hideContactInfo && !genAvatars && cachedAvatarBytes != null) {
+                final initials = cachedInitials?.substring(0, iOS ? null : 1);
+                // Web has no filesystem to cache avatars to — use the in-memory
+                // bytes fetched during contact sync instead of a file path.
+                return SizedBox.expand(
+                  child: Image.memory(
+                    cachedAvatarBytes,
+                    cacheHeight: ContactAvatarWidget.avatarDecodeSize,
+                    cacheWidth: ContactAvatarWidget.avatarDecodeSize,
+                    filterQuality: FilterQuality.low,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                    frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+                      if (wasSynchronouslyLoaded || frame != null) return child;
+                      return Center(child: _buildInitialsOrIcon(size, iOS, initials));
+                    },
+                    errorBuilder: (context, error, stackTrace) {
+                      return Center(child: _buildInitialsOrIcon(size, iOS, initials));
+                    },
+                  ),
+                );
+              } else if ((isNullOrEmpty(contactV2Avatar) && cachedAvatarBytes == null) || hideContactInfo || genAvatars) {
                 // Use reactive initials from HandleState
                 String? initials = cachedInitials?.substring(0, iOS ? null : 1);
                 if (!isNullOrEmpty(initials) && !hideContactInfo && !genAvatars) {
