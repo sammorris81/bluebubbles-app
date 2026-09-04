@@ -106,24 +106,61 @@ negative result.
 ### 3. Photo downloading — not started
 Not yet investigated this session at all.
 
-### Contacts not loading/displaying on web — root-caused, not fixed
+### Contacts not loading/displaying on web — fixed and verified live
 (Reported by the user during this same debugging pass; separate from the three
-original bugs but discovered along the way.) A background investigation found:
-- `ContactV2Actions._syncContactsToHandlesInternal` (`lib/services/backend/actions/contact_v2_actions.dart`,
-  around line 208) wraps its matching/persist step in `Database.runInTransaction`
-  unconditionally — this throws/no-ops on web where ObjectBox isn't initialized.
-  Needs a `kIsWeb` guard/branch, similar to the `kIsDesktop || kIsWeb` guard already
-  added (this session, in the same file) to the earlier contact-fetch step.
-- Some `ContactV2Interface` hydration methods are likewise unguarded for web.
-- `notifyHandlesUpdated` is a no-op on web, so even if matching succeeded nothing
-  tells the UI to refresh.
-- `full_sync_manager.dart` sequencing bug: `ChatsSvc.init()` rebuilds `Handle` objects
-  *after* contact matching runs, discarding the match.
+original bugs but discovered along the way.)
 
-None of this has been fixed yet — the user explicitly deprioritized it ("separate
-from the contact issue, can you please fix the sorting order for the chat list")
-while the sort bug was being worked. Pick this up once sorting is confirmed fixed,
-unless told otherwise.
+Root causes (all confirmed empirically):
+- On web, `Database.init()` returns early, so `Database.store` and every `Box` are
+  uninitialized `late final`. The old Step 2 of contact sync threw
+  `LateInitializationError: Field 'store' has not been initialized` before matching a
+  single contact — confirmed in the browser console. The 474-contact fetch itself was
+  fine; only the matching half was broken.
+- Ordering bug: `ContactServiceV2.init()` fires its first sync (from `StartupTasks`)
+  before the chat list has loaded any handles, so that first pass always matches zero.
+  Confirmed by timestamps in one run: contact sync completed at `15:10:52.254`, chats
+  finished loading at `15:10:52.558`.
+- `/chat/query` returns participants carrying only `originalROWID` — no `ROWID` and no
+  `id` (verified by calling the endpoint directly from the page). `Handle.fromMap` left
+  `id` null for every web handle as a result, so `HandleService.getOrCreateHandleState`
+  returned an uncached, ephemeral `HandleState` for every participant, and
+  `affectedHandleIds` was always empty. This is why an intermediate test run logged
+  `Matched 115/474 contacts to in-memory handles` but `notifying UI of 0 affected
+  handles` — matching worked, but nothing could reach the UI. Avatars picked up contact
+  initials in that state (that widget reads the mutated `Handle` directly) while titles
+  still showed phone numbers (those go through `ChatState.title`, which only updates via
+  the `ever(hs.displayName, ...)` worker on a *registered* `HandleState`).
+
+Fix (four files, all live-verified against `http://10.7.12.13:8090/web`):
+- `lib/services/backend/actions/contact_v2_actions.dart` — extracted shared
+  side-effect-free helpers (`_buildHandleLookupMaps`, `_normalizedAddressesFor`,
+  `_matchHandles`) out of the old Step 2, then added `_matchContactsToWebHandles(...)`,
+  a web-only replacement that matches server-fetched contacts against the in-memory
+  handles from `ChatsSvc.webCachedHandles` plus every loaded chat's `handles`, and
+  attaches results to `handle.contactsV2`. Step 2 now branches:
+  `if (kIsWeb) { _matchContactsToWebHandles(...) } else { Database.runInTransaction(...) }`.
+  Also skips `_saveContactAvatar` on web and requests `withAvatars: !kIsWeb` (avatar
+  downloading is a separate, not-yet-investigated item — see below).
+- `lib/services/ui/contact_service_v2.dart` — added `_notifyHandlesUpdatedWeb()`, a web
+  path for `notifyHandlesUpdated` that pushes the in-memory handles through
+  `HandleSvc.updateHandleStates`.
+- `lib/services/ui/chat/chats_service.dart` — at the end of `_initInternal()`, on web,
+  re-runs `ContactsSvcV2.syncContactsToHandles(wait: false)` after the chat list (and
+  its handles) have loaded, fixing the ordering bug above.
+- `lib/database/html/handle.dart` — `Handle.fromMap` now falls back to `originalROWID`
+  for `id`: `json["ROWID"] ?? json["id"] ?? json["originalROWID"]`, fixing the missing-id
+  bug above so handles get real, cacheable ids and `HandleState`s are no longer
+  ephemeral.
+
+**Verified live**: after the fix, console shows
+`Matched 115/474 contacts to in-memory handles` →
+`notifying UI of 92 affected handles` → `Refreshed 92 web handle states after contact
+sync`, and chat tiles render real contact names (e.g. "Vickie Woodard (Weber)", "Jake
+Hegge", "Miranda Panzer") instead of raw phone numbers. Tiles for numbers with no
+matching contact correctly continue to show the raw number — that's expected, not a
+bug. Note the very first sync (fired by `ContactServiceV2.init()` before chats load)
+still logs 0 affected handles, as expected — it's the *second* sync, triggered from
+`chats_service.dart` after handles exist, that succeeds.
 
 ### Link-preview CORS image errors — cosmetic, no fix needed
 Browser console showed CORS-blocked image loads for `share.1password.com` Open Graph
@@ -137,5 +174,5 @@ visually, not just noisy in the console.
 ## Suggested order to keep working
 
 1. ~~Verify the chat-list sort fix live, commit, push.~~ Done.
-2. Photo downloading — not investigated yet; start fresh.
-3. Contacts — apply the fixes already identified above.
+2. ~~Contacts — apply the fixes already identified above.~~ Done, verified live.
+3. Photo downloading — not investigated at all yet. Next up.
