@@ -2,6 +2,7 @@ import 'package:bluebubbles/database/database.dart';
 import 'package:bluebubbles/database/models.dart';
 import 'package:bluebubbles/services/services.dart';
 import 'package:collection/collection.dart';
+import 'package:flutter/foundation.dart';
 
 import 'local_search_io.dart' if (dart.library.html) 'local_search_web.dart' as local_search;
 import 'search_models.dart';
@@ -82,8 +83,16 @@ class SearchQueryHelper {
       itemMessages.add(Message.fromMap(item));
     }
 
-    final chatGuids = itemChats.map((e) => e.guid).toList();
-    final dbChats = Database.chats.query(Chat_.guid.oneOf(chatGuids)).build().find();
+    // No local ObjectBox DB on web — fall back to the in-memory chat state
+    // (already hydrated from the server) instead of querying `Database.chats`,
+    // which is an uninitialized `late final` there.
+    final List<Chat> dbChats;
+    if (kIsWeb) {
+      dbChats = itemChats.map((e) => ChatsSvc.getChatState(e.guid)?.chat).whereType<Chat>().toList();
+    } else {
+      final chatGuids = itemChats.map((e) => e.guid).toList();
+      dbChats = Database.chats.query(Chat_.guid.oneOf(chatGuids)).build().find();
+    }
 
     final items = <SearchResultItem>[];
     for (int i = 0; i < itemChats.length; i++) {
