@@ -378,6 +378,15 @@ class ChatsService {
     // seed the badge with the correct value before any message is received.
     _recalculateUnreadCount();
 
+    // On web, contact matching runs against the handles held in memory here
+    // (there's no local DB to match against), but ContactServiceV2.init() fires
+    // its first sync from StartupTasks *before* this method has loaded any —
+    // so that sync always matched zero handles. Re-run it now that they exist.
+    // reset() clears webCachedHandles, so this also covers the re-init path.
+    if (kIsWeb && GetIt.I.isRegistered<ContactServiceV2>()) {
+      unawaited(ContactsSvcV2.syncContactsToHandles(wait: false));
+    }
+
     if (kIsDesktop) {
       unawaited(
         DesktopNotifications.cancelStale(keepGroups: chatStates.values.where((s) => s.hasUnreadMessage.value).map((s) => s.chat.guid).toList())

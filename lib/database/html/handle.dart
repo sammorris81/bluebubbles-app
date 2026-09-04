@@ -126,7 +126,16 @@ class Handle {
   }
 
   factory Handle.fromMap(Map<String, dynamic> json) => Handle(
-        id: json["ROWID"] ?? json["id"],
+        // Fall back to originalROWID: web has no local ObjectBox row to get an
+        // `id` from, and `/chat/query` returns participants carrying only
+        // `originalROWID` (no ROWID/id at all). Leaving `id` null there breaks
+        // everything keyed on it — `HandleService.getOrCreateHandleState` hands
+        // back an uncached, throwaway HandleState for every participant, so
+        // contact-sync updates never reach the chat list, and
+        // `removeParticipant`'s `id == id` check matches every handle at once.
+        // The server's handle ROWID is stable and unique, which is all `id`
+        // needs to be on web.
+        id: json["ROWID"] ?? json["id"] ?? json["originalROWID"],
         originalROWID: json["originalROWID"],
         address: json["address"],
         service: json["service"] ?? "iMessage",
