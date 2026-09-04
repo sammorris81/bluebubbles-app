@@ -116,8 +116,10 @@ class ContactV2Actions {
       List<ContactV2> networkContacts = [];
       final avatarPaths = <String, String?>{};
 
-      if (kIsDesktop) {
+      if (kIsDesktop || kIsWeb) {
         // Step 1: Fetch contacts from server
+        // Browsers have no device contact book — flutter_contacts (the
+        // `else` branch below) doesn't support web at all and crashes there.
         Logger.info('[ContactV2] Starting contact fetch from server...');
         final response = await HttpSvc.contact.fetchAll(withAvatars: true);
 

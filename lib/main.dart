@@ -68,6 +68,14 @@ Future<Null> initApp(bool bubble, List<String> arguments) async {
   runZonedGuarded<Future<void>>(() async {
     WidgetsFlutterBinding.ensureInitialized();
 
+    // Flips on the dev-only JS error forwarder in web/index.html
+    // (`bb-debug-error-forwarder`) by marking the page as a debug build. Only
+    // ever set here — a release/profile web build never touches this, so the
+    // forwarder stays inert (its `isDebug()` check reads this attribute).
+    if (kIsWeb && kDebugMode) {
+      html.document.documentElement?.setAttribute('data-bb-debug', 'true');
+    }
+
     /* ----- DESKTOP NATIVE SPLASH STATUS ----- */
     // Pushes startup status to the native splash; detached once it's dismissed.
     void Function()? detachSplashStatus;
@@ -533,7 +541,13 @@ class _HomeState extends State<Home> with WidgetsBindingObserver, TrayListener {
       };
       /* ----- SERVER VERSION CHECK ----- */
       if (kIsWeb && SettingsSvc.settings.finishedSetup.value) {
-        final serverDetails = SettingsSvc.getServerDetails();
+        // getServerDetails() reads a cached value that's only populated once
+        // the fire-and-forget refreshServerDetails() call from startup_tasks
+        // completes — reading it this early (right after first frame) races
+        // that fetch and normally loses, tripping this check on the
+        // ServerDetails.empty() default (serverVersionCode: 0) rather than
+        // the server's real version. Await the real fetch instead.
+        final serverDetails = await SettingsSvc.refreshServerDetails().then((_) => SettingsSvc.getServerDetails());
         if (!serverDetails.minimumWebSupportedVersion) {
           setState(() {
             serverCompatible = false;

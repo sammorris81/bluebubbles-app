@@ -60,7 +60,7 @@ class ChatLatestMessageMigration {
         chatBox.putMany(chatsToUpdate);
       }
 
-      processed += batch.length;
+      processed += batch.length as int;
       // the await is what gets this to the splash while the migration owns the isolate.
       await StartupTasks.setSplashProgress(processed / totalChats);
       Logger.info("Backfilled $processed / $totalChats chats...", tag: "DB-Migration");

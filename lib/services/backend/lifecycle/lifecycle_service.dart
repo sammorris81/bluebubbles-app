@@ -12,7 +12,7 @@ import 'package:flutter/widgets.dart';
 import 'package:bluebubbles/services/isolates/global_isolate.dart';
 
 import 'package:universal_html/html.dart' hide Platform;
-import 'dart:io' show Platform;
+import 'package:universal_io/io.dart' show Platform;
 import 'package:get_it/get_it.dart';
 
 // ignore: non_constant_identifier_names

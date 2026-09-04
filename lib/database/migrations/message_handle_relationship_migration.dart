@@ -93,7 +93,7 @@ class MessageHandleRelationshipMigration {
           Database.messages.putMany(messagesToUpdate);
         }
 
-        processed += batch.length;
+        processed += batch.length as int;
 
         // Per batch
         await StartupTasks.setSplashProgress(processed / totalMessages);

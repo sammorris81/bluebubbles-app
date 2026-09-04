@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:bluebubbles/helpers/helpers.dart';
@@ -6,6 +7,7 @@ import 'package:bluebubbles/database/html/message.dart';
 import 'package:bluebubbles/database/html/objectbox.dart';
 import 'package:bluebubbles/services/services.dart';
 import 'package:mime_type/mime_type.dart';
+import 'package:passkit/passkit.dart';
 
 class Attachment {
   int? id;
@@ -23,6 +25,7 @@ class Attachment {
   Map<String, dynamic>? metadata;
   Map<String, dynamic>? exif;
   bool hasLivePhoto;
+  bool isDownloaded;
 
   final message = ToOne<Message>();
 
@@ -42,7 +45,23 @@ class Attachment {
     this.bytes,
     this.webUrl,
     this.hasLivePhoto = false,
+    this.isDownloaded = false,
   });
+
+  static Future<Attachment?> findOneAsync(String guid) async => null;
+
+  static Future<List<Attachment>> findAsync({dynamic queryDescriptor}) async => [];
+
+  /// Mirrors io/attachment.dart, which itself no-ops on web
+  /// (`if (kIsWeb) return this/newAttachment;`) — the real behavior is local
+  /// DB persistence and filesystem directory renames, neither of which apply.
+  Future<Attachment> saveAsync(Message? message) async => this;
+
+  static Future<Attachment> replaceAttachmentAsync(String? oldGuid, Attachment newAttachment) async => newAttachment;
+
+  static Future<void> deleteAsync(String guid) async {}
+
+  String previewPathForQuality(int quality) => "$path.preview.q$quality.jpg";
 
   factory Attachment.fromMap(Map<String, dynamic> json) {
     String? mimeType = json["mimeType"];
@@ -80,6 +99,7 @@ class Attachment {
       metadata: metadata is String ? null : metadata,
       exif: exif is String ? null : exif,
       hasLivePhoto: json["hasLivePhoto"] ?? false,
+      isDownloaded: json["isDownloaded"] ?? false,
     );
   }
 
@@ -124,6 +144,31 @@ class Attachment {
   double get aspectRatio =>
       hasValidSize ? (_isPortrait && height! < width! ? (height! / width!).abs() : (width! / height!).abs()) : 0.78;
 
+  /// Mirrors the io/ implementation's orientation-swap, using web's plain
+  /// `width`/`height` fields (no raw/metadata distinction here).
+  int? get displayWidth {
+    if (!hasValidSize) return (metadata?['width'] as num?)?.toInt();
+    return _isPortrait && height! < width! ? height : width;
+  }
+
+  int? get displayHeight {
+    if (!hasValidSize) return (metadata?['height'] as num?)?.toInt();
+    return _isPortrait && height! < width! ? width : height;
+  }
+
+  /// See io/attachment.dart's `displayBox` — the single source of truth for
+  /// the box an attachment occupies inline, given the bubble's [maxWidth].
+  ({double width, double height}) displayBox(double maxWidth, [double maxHeight = double.infinity]) {
+    final fallbackHeight = maxWidth / aspectRatio;
+    double width = math.min(displayWidth?.toDouble() ?? maxWidth, maxWidth);
+    double height = math.min(displayHeight?.toDouble() ?? fallbackHeight, fallbackHeight);
+    if (height > maxHeight) {
+      width *= maxHeight / height;
+      height = maxHeight;
+    }
+    return (width: width, height: height);
+  }
+
   String? get mimeStart => mimeType?.split("/").first;
 
   static String get baseDirectory => FilesystemSvc.attachmentsPath;
@@ -146,6 +191,9 @@ class Attachment {
 
   bool get canCompress => mimeStart == "image" && !mimeType!.contains("gif");
 
+  /// No filesystem access on web, so a pass can never be loaded from disk.
+  PkPass? get pkPass => null;
+
   bool get isPkPass => false;
 
   static Attachment merge(Attachment attachment1, Attachment attachment2) {
@@ -165,6 +213,10 @@ class Attachment {
     if (attachment2.hasLivePhoto) {
       attachment1.hasLivePhoto = attachment2.hasLivePhoto;
     }
+    // Only overwrite isDownloaded if the new attachment is downloaded
+    if (!attachment1.isDownloaded && attachment2.isDownloaded) {
+      attachment1.isDownloaded = attachment2.isDownloaded;
+    }
     return attachment1;
   }
 
@@ -182,6 +234,7 @@ class Attachment {
         "metadata": jsonEncode(metadata),
         "exif": jsonEncode(exif),
         "hasLivePhoto": hasLivePhoto,
+        "isDownloaded": isDownloaded,
       };
 
   bool get _isPortrait {

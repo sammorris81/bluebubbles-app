@@ -36,7 +36,8 @@ class Message {
   int? associatedMessagePart;
   String? associatedMessageType;
   String? expressiveSendStyleId;
-  Handle? handle;
+  String? errorMessage;
+  bool hasEffectPlayed;
   bool hasAttachments;
   bool hasReactions;
   DateTime? dateDeleted;
@@ -66,12 +67,22 @@ class Message {
   DateTime? get dateDelivered => _dateDelivered.value;
   set dateDelivered(DateTime? d) => _dateDelivered.value = d;
 
+  final RxBool _isDelivered = RxBool(false);
+  bool get isDelivered => (dateDelivered != null) ? true : _isDelivered.value;
+  set isDelivered(bool b) => _isDelivered.value = b;
+
   final Rxn<DateTime> _dateEdited = Rxn<DateTime>();
   DateTime? get dateEdited => _dateEdited.value;
   set dateEdited(DateTime? d) => _dateEdited.value = d;
 
   final chat = ToOne<Chat>();
   final dbAttachments = <Attachment>[];
+
+  /// Web has no ObjectBox relation, but backend action/sync code (shared with
+  /// io/) reads and writes this like one — see `database/io/message.dart`.
+  final handleRelation = ToOne<Handle>();
+  Handle? get handle => handleRelation.target;
+  set handle(Handle? h) => handleRelation.target = h;
 
   Message({
     this.id,
@@ -97,7 +108,8 @@ class Message {
     this.associatedMessagePart,
     this.associatedMessageType,
     this.expressiveSendStyleId,
-    this.handle,
+    Handle? handle,
+    this.hasEffectPlayed = false,
     this.hasAttachments = false,
     this.hasReactions = false,
     this.attachments = const [],
@@ -115,6 +127,7 @@ class Message {
     this.didNotifyRecipient = false,
     this.isBookmarked = false,
   }) {
+    this.handle = handle;
     if (error != null) _error.value = error;
     if (dateRead != null) _dateRead.value = dateRead;
     if (dateDelivered != null) _dateDelivered.value = dateDelivered;
@@ -290,12 +303,47 @@ class Message {
     return [];
   }
 
-  static void delete(String guid) {
+  static Future<void> delete(String guid) async {
     return;
   }
 
-  static void softDelete(String guid) {
+  static Future<void> softDelete(String guid) async {
     return;
+  }
+
+  /// Only used by Handle Audit, a local-DB diagnostic tool disabled on web
+  /// (see `handle_audit_panel.dart`'s `if (kIsWeb) return;` in `_runAudit`) —
+  /// should never actually be reached at runtime here.
+  static Future<int> relinkMessagesToHandle({required int handleId, required int localHandleId}) async {
+    throw Exception('Unsupported Platform');
+  }
+
+  bool get isPhotoSlideshow => balloonBundleId?.split(":").last == 'com.apple.mobileslideshow.PhotosMessagesApp';
+
+  Message setEffectPlayed() {
+    hasEffectPlayed = true;
+    save();
+    return this;
+  }
+
+  /// This is purely because some Macs incorrectly report the dateCreated time
+  /// as being after the dateDelivered time, which throws off sorting.
+  static int sort(Message a, Message b, {bool descending = true}) {
+    late DateTime aDateToUse;
+    if (a.dateDelivered == null) {
+      aDateToUse = a.dateCreated!;
+    } else {
+      aDateToUse = a.dateCreated!.isBefore(a.dateDelivered!) ? a.dateCreated! : a.dateDelivered!;
+    }
+
+    late DateTime bDateToUse;
+    if (b.dateDelivered == null) {
+      bDateToUse = b.dateCreated!;
+    } else {
+      bDateToUse = b.dateCreated!.isBefore(b.dateDelivered!) ? b.dateCreated! : b.dateDelivered!;
+    }
+
+    return descending ? bDateToUse.compareTo(aDateToUse) : aDateToUse.compareTo(bDateToUse);
   }
 
   String get fullText => sanitizeString([subject, text].where((e) => !isNullOrEmpty(e)).join("\n"));
@@ -308,6 +356,49 @@ class Message {
   String? get url => text?.replaceAll("\n", " ").split(" ").firstWhereOrNull((String e) => e.hasUrl);
 
   bool get isInteractive => balloonBundleId != null && !isLegacyUrlPreview;
+
+  bool get isSending => isFromMe == true && guid != null && guid!.startsWith("temp");
+
+  bool get isSticker => associatedMessageType == "sticker" && associatedMessageGuid != null;
+
+  bool get isKeptAudio => itemType == 5 && subject != null;
+
+  bool get isNameChange => itemType == 2;
+
+  bool get isGroupPhotoEvent => itemType == 3 && (groupActionType ?? 0) > 0;
+
+  bool get isGroupPhotoRemoved => itemType == 3 && groupActionType == 2;
+
+  bool isNewerThan(Message other) {
+    if (error == 0 && other.error != 0) return false;
+
+    if (dateCreated == null && other.dateCreated != null) return false;
+    if (dateCreated != null && other.dateCreated == null) return true;
+    if (!isDelivered && other.isDelivered) return false;
+    if (isDelivered && !other.isDelivered) return true;
+    if (dateDelivered == null && other.dateDelivered != null) return false;
+    if (dateDelivered != null && other.dateDelivered == null) return true;
+    if (dateRead == null && other.dateRead != null) return false;
+    if (dateRead != null && other.dateRead == null) return true;
+    if (datePlayed == null && other.datePlayed != null) return false;
+    if (datePlayed != null && other.datePlayed == null) return true;
+    if (dateEdited == null && other.dateEdited != null) return false;
+    if (dateEdited != null && other.dateEdited == null) return true;
+
+    if (dateEdited != null && other.dateEdited != null) {
+      return dateEdited!.millisecondsSinceEpoch > other.dateEdited!.millisecondsSinceEpoch;
+    } else if (datePlayed != null && other.datePlayed != null) {
+      return datePlayed!.millisecondsSinceEpoch > other.datePlayed!.millisecondsSinceEpoch;
+    } else if (dateRead != null && other.dateRead != null) {
+      return dateRead!.millisecondsSinceEpoch > other.dateRead!.millisecondsSinceEpoch;
+    } else if (dateDelivered != null && other.dateDelivered != null) {
+      return dateDelivered!.millisecondsSinceEpoch > other.dateDelivered!.millisecondsSinceEpoch;
+    } else if (dateCreated != null && other.dateCreated != null) {
+      return dateCreated!.millisecondsSinceEpoch > other.dateCreated!.millisecondsSinceEpoch;
+    }
+
+    return false;
+  }
 
   String get interactiveText {
     String text = "";

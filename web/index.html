@@ -138,5 +138,96 @@
     });
   </script>
 
+  <!--
+    Dev-only: forwards uncaught errors and error/warn-level console output to
+    a local collector (js_error_collector.py) so they can be read without
+    copy-pasting DevTools output by hand. Never active unless the Dart side
+    marks the page as a debug build — see the `kIsWeb && kDebugMode` block
+    near the top of `initApp()` in lib/main.dart, which sets the
+    `data-bb-debug` attribute checked below. In a release/profile build that
+    attribute is never set, `isDebug()` stays false, and nothing is sent.
+  -->
+  <script id="bb-debug-error-forwarder">
+    (function () {
+      var COLLECTOR_URL = 'http://' + location.hostname + ':8091/log';
+      var MAX_PER_MESSAGE = 3; // dedupe: a message repeated 474 times only needs to be seen 3 times
+      var seen = {};
+
+      function isDebug() {
+        return document.documentElement.hasAttribute('data-bb-debug');
+      }
+
+      // The app's own Logger (lib/utils/logger/logger.dart) prints every level
+      // via debugPrint -> console.log, tagged "[ERROR]"/"[WARN]". Flutter's
+      // FlutterError.onError is also wired to Logger.error in main.dart, so
+      // framework rendering errors carry the same tag. An error/warn call
+      // also dumps the exception + up to 25 stack frames as separate
+      // console.log calls right after — Dart stack frames always start with
+      // "#0", "#1", etc., and exception toString()s are overwhelmingly
+      // "SomeError:"/"SomeException:" or one of the two null-check wordings
+      // Dart's SDK has used across versions. A window-based "next N lines"
+      // approach was tried and reverted — this app logs so frequently
+      // (HTTP request/response per line) that a fixed window after every
+      // tagged error swept in unrelated INFO noise instead of just the dump.
+      var TAGGED = /\[ERROR\]|\[WARN\]|^#\d+\s|\w(Error|Exception)\b|Unexpected null|Null check operator|is not a subtype of type/;
+
+      // Strip the app's own per-call ISO timestamp before hashing for dedupe,
+      // so "Failed to fetch message chunk!" (identical text, different
+      // millisecond) actually collapses instead of dodging the cap.
+      var TIMESTAMP_PREFIX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z\s*/;
+
+      function send(level, message, stack, url) {
+        if (!isDebug()) return;
+        message = String(message == null ? '' : message);
+        var key = level + ':' + message.replace(TIMESTAMP_PREFIX, '').slice(0, 200);
+        seen[key] = (seen[key] || 0) + 1;
+        if (seen[key] > MAX_PER_MESSAGE) return;
+
+        var payload = {
+          level: level,
+          message: message,
+          stack: stack ? String(stack) : undefined,
+          url: url || location.href,
+        };
+        if (seen[key] === MAX_PER_MESSAGE) {
+          payload.count = seen[key];
+          payload.message += ' [further identical messages suppressed]';
+        }
+
+        try {
+          fetch(COLLECTOR_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' }, // avoids a CORS preflight
+            body: JSON.stringify(payload),
+            keepalive: true,
+          }).catch(function () {}); // collector may not be running — never surface that as its own error
+        } catch (e) {}
+      }
+
+      window.addEventListener('error', function (event) {
+        send('error', event.message, event.error && event.error.stack, event.filename);
+      });
+
+      window.addEventListener('unhandledrejection', function (event) {
+        var reason = event.reason;
+        send('unhandledrejection', reason && reason.message ? reason.message : reason, reason && reason.stack);
+      });
+
+      var originalError = console.error;
+      console.error = function () {
+        var text = Array.prototype.slice.call(arguments).join(' ');
+        send('console.error', text);
+        return originalError.apply(console, arguments);
+      };
+
+      var originalLog = console.log;
+      console.log = function () {
+        var text = Array.prototype.slice.call(arguments).join(' ');
+        if (TAGGED.test(text)) send('console.log', text);
+        return originalLog.apply(console, arguments);
+      };
+    })();
+  </script>
+
 
 </body></html>

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:bluebubbles/app/layouts/settings/pages/server/backup_restore_panel.dart';
@@ -9,8 +10,11 @@ import 'package:bluebubbles/app/layouts/conversation_list/pages/conversation_lis
 import 'package:bluebubbles/app/layouts/setup/dialogs/failed_to_scan_dialog.dart';
 import 'package:bluebubbles/app/layouts/setup/pages/page_template.dart';
 import 'package:bluebubbles/app/layouts/setup/setup_view.dart';
+import 'package:bluebubbles/helpers/backend/startup_tasks.dart';
+import 'package:bluebubbles/helpers/network/network_tasks.dart';
 import 'package:bluebubbles/services/services.dart';
 import 'package:confetti/confetti.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:shimmer/shimmer.dart';
@@ -36,6 +40,26 @@ class _SyncProgressState extends State<SyncProgress> {
   @override
   void initState() {
     super.initState();
+
+    // There's no local DB to run a full sync into on web, and nothing ever
+    // starts one there (SyncSettings, the only place that calls
+    // SyncSvc.startFullSync(), is skipped on web) — so `fullSyncManager` is
+    // always null here. That also means `SetupService._finishSetup()` (only
+    // called from SyncSettings) never runs, so `finishedSetup` stays false
+    // forever and ChatsSvc.init() keeps bailing out early. Run the
+    // web-relevant subset of that completion sequence here instead.
+    if (kIsWeb) {
+      hasPlayed = true;
+      unawaited(() async {
+        SettingsSvc.settings.finishedSetup.value = true;
+        await SettingsSvc.settings.saveOneAsync('finishedSetup');
+        ChatsSvc.reset();
+        await ChatsSvc.init(force: true);
+        await StartupTasks.onStartup();
+        await NetworkTasks.onConnect();
+      }());
+      return;
+    }
 
     ever<SyncStatus>(syncManager.status, (event) async {
       String err = syncManager.error ?? "Unknown Error";

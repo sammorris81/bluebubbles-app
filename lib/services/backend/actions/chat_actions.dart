@@ -279,7 +279,7 @@ class ChatActions {
           if (chatHandles.length == 1) {
             handleToLink = chatHandles.first;
             Logger.warn(
-              'Linked message ${inputMessage.guid} to sole participant ${handleToLink.address} '
+              'Linked message ${inputMessage.guid} to sole participant ${handleToLink!.address} '
               '(originalROWID lookup for handleId=${inputMessage.handleId} failed)',
               tag: 'ChatActions',
             );

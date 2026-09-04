@@ -1,6 +1,50 @@
 import 'dart:typed_data';
 
+import 'package:bluebubbles/database/html/handle.dart';
+import 'package:bluebubbles/database/html/objectbox.dart';
 import 'package:flutter/material.dart';
+
+/// A phone number with an associated label (e.g., "mobile", "work", "home").
+/// Mirrors `database/io/contact_v2.dart`'s `ContactPhone`.
+class ContactPhone {
+  final String number;
+  final String label;
+
+  const ContactPhone({required this.number, required this.label});
+
+  Map<String, dynamic> toMap() => {'number': number, 'label': label};
+
+  static ContactPhone fromMap(Map<String, dynamic> m) =>
+      ContactPhone(number: m['number'] ?? '', label: m['label'] ?? '');
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) || (other is ContactPhone && number == other.number && label == other.label);
+
+  @override
+  int get hashCode => Object.hash(number, label);
+}
+
+/// An email address with an associated label (e.g., "work", "home").
+/// Mirrors `database/io/contact_v2.dart`'s `ContactEmail`.
+class ContactEmail {
+  final String address;
+  final String label;
+
+  const ContactEmail({required this.address, required this.label});
+
+  Map<String, dynamic> toMap() => {'address': address, 'label': label};
+
+  static ContactEmail fromMap(Map<String, dynamic> m) =>
+      ContactEmail(address: m['address'] ?? '', label: m['label'] ?? '');
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) || (other is ContactEmail && address == other.address && label == other.label);
+
+  @override
+  int get hashCode => Object.hash(address, label);
+}
 
 /// Web stub for ContactV2 - minimal implementation for web compatibility
 class ContactV2 {
@@ -8,15 +52,48 @@ class ContactV2 {
     this.id = 0,
     required this.displayName,
     required this.nativeContactId,
+    this.isNative = false,
     this.avatarPath,
     this.addresses = const [],
+    this.nickname,
+    this.firstName,
+    this.lastName,
+    this.middleName,
+    this.namePrefix,
+    this.nameSuffix,
+    this.company,
   });
 
   int id;
   String displayName;
   String nativeContactId;
+  bool isNative;
   String? avatarPath;
   List<String> addresses;
+  String? nickname;
+  String? firstName;
+  String? lastName;
+  String? middleName;
+  String? namePrefix;
+  String? nameSuffix;
+  String? company;
+
+  /// Mirrors io/contact_v2.dart's `handles` ToMany backlink (from
+  /// `Handle.contactsV2`) — not auto-populated by any ObjectBox relation on
+  /// web, so it only ever holds what's explicitly added to it.
+  final handles = ToMany<Handle>();
+  List<ContactPhone> phoneNumbers = [];
+  List<ContactEmail> emailAddresses = [];
+
+  /// Returns the best display name: prefers nickname, then first+last, then raw displayName.
+  String get computedDisplayName {
+    if (nickname != null && nickname!.isNotEmpty) return nickname!;
+    final first = firstName ?? '';
+    final last = lastName ?? '';
+    final full = '$first $last'.trim();
+    if (full.isNotEmpty) return full;
+    return displayName;
+  }
 
   // Stub properties for web
   Widget? _fakeAvatar;
@@ -54,6 +131,18 @@ class ContactV2 {
           contactAddress.contains('@') ? normalizeEmail(contactAddress) : normalizePhoneNumber(contactAddress);
       return contactNormalized == normalized;
     });
+  }
+
+  /// Formats this contact for the server upload API.
+  /// Field names match what the server expects (and sends back on fetch).
+  Map<String, dynamic> toServerMap() {
+    return {
+      'displayName': displayName,
+      'firstName': firstName,
+      'lastName': lastName,
+      'phoneNumbers': phoneNumbers.map((e) => e.number).toList(),
+      'emails': emailAddresses.map((e) => e.address).toList(),
+    };
   }
 
   Map<String, dynamic> toMap() {

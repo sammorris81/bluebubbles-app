@@ -1,7 +1,7 @@
 import 'package:bluebubbles/app/layouts/settings/widgets/tiles/contact_upload_progress.dart';
 import 'package:bluebubbles/database/database.dart';
 import 'package:bluebubbles/database/global/settings.dart';
-import 'package:bluebubbles/database/io/fcm_data.dart';
+import 'package:bluebubbles/database/models.dart';
 import 'package:bluebubbles/helpers/helpers.dart';
 import 'package:bluebubbles/services/services.dart';
 import 'package:bluebubbles/utils/logger/logger.dart';

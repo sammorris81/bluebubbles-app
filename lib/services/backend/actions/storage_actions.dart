@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:bluebubbles/database/database.dart';
 import 'package:bluebubbles/database/models.dart';
-import 'package:bluebubbles/generated/objectbox.g.dart';
 import 'package:bluebubbles/models/models.dart';
 import 'package:bluebubbles/services/isolates/global_isolate.dart';
 import 'package:bluebubbles/services/isolates/isolate_event.dart';
