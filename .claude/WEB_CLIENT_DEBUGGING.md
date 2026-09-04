@@ -103,8 +103,75 @@ the browser was still running a pre-fix build. See the rebuild gotcha under
 "How to run it" — check process start time against file mtime before trusting a
 negative result.
 
-### 3. Photo downloading — not started
-Not yet investigated this session at all.
+### 3. Photo downloading — one confirmed bug fixed, default path reviewed but not live-verified
+Started this session. Read through the full download pipeline for web: `AttachmentHolder`
+(`lib/app/layouts/conversation_view/widgets/message/attachment/attachment_holder.dart`) →
+`MessagesService.loadAttachmentContent`/`_startAttachmentDownload`
+(`lib/services/ui/message/messages_service.dart`) → `AttachmentsService.getContent`
+(`lib/services/ui/attachments_service.dart`) → `AttachmentDownloadController.fetchAttachment`
+(`lib/services/network/downloads_service.dart`) → `AttachmentApi.download`
+(`lib/services/network/api/attachment_api.dart`) → rendering in `ImageViewer`
+(`lib/app/layouts/conversation_view/widgets/message/attachment/image_viewer.dart`).
+
+**Confirmed bug, fixed**: `AttachmentsService.getContent()`'s web branch collapsed two
+unrelated conditions into one `else`: "bytes already cached" and "auto-download disabled" both
+fell through to returning a `PlatformFile` with `bytes: attachment.bytes` — which is `null` in
+the auto-download-off case, since nothing has fetched it yet. That fake "resolved" file then
+got treated as complete content by `loadAttachmentContent` (`attState.updateResolvedFileInternal(content)`,
+`updateIsDownloadedInternal(true)`), rendering as a permanently blank `SizedBox` in `ImageViewer`
+(`file.bytes == null`) with no way to retry — `AttachmentHolder._buildOnTap` returns `null`
+whenever `resolvedFile.value != null`, regardless of whether that "resolved" file actually has
+data. Net effect: with the **Auto Download** setting turned off, every image on web renders as a
+blank, untappable box forever. Fixed by splitting the branch so "no bytes and auto-download off"
+falls through to returning the bare `Attachment` instead, matching native's behavior — this
+makes `loadAttachmentContent` show the normal tap-to-download placeholder.
+Auto Download defaults to `true`, so this doesn't affect a fresh install, only accounts that
+have explicitly disabled it.
+
+**Default path (Auto Download on) reviewed, not live-verified**: traced the full chain by hand
+and it looks correct — `getContent` starts an `AttachmentDownloadController` when
+`attachment.bytes == null`, `fetchAttachment()` requests with `savePath: null` so
+`AttachmentApi.download` uses `ResponseType.bytes` instead of streaming to a file, and
+`_processDownloadedFile` stores the result on `attachment.bytes` and wraps it in a `PlatformFile`
+that `ImageViewer` renders via `Image.memory`. Also worth noting: `AttachmentState`'s constructor
+seeds `transferState` from `attachment.isDownloaded` (the *server's* flag, stale/irrelevant on
+web since bytes are always empty after a fresh page load) — currently harmless because nothing
+short-circuits on `transferState == complete` without also checking `resolvedFile != null`, but
+it's a latent trap if that ever changes.
+
+**Could not live-verify with a real photo this session.** Every chat in this account either had
+no attachments in its loaded history or wasn't reachable (see below), and sending a fresh test
+photo requires the browser's native file-picker dialog, which the Claude-in-Chrome tooling
+cannot drive here — the click reaches the app fine and opens the chooser, but the chooser itself
+runs outside anything `find`/`read_page`/`file_upload` can see or fill (no `<input type=file>`
+ever shows up in the accessibility tree, and `file_upload` requires a `ref` to one). Confirmed
+the account's own number for self-testing via Settings → iMessage Profile: `+19193574218`.
+Successfully created a fresh 1:1 chat with "Sam Morris" (self) and sent a **text-only** test
+message ("test photo download") to confirm the compose flow at least works end to end
+(self-messages loop back near-instantly and show `Read`) — but never got a real image attached
+to it. If picking this up again: either have the user attach a photo manually from the live
+browser session, or find/create a message with an attachment some other way (the REST API
+directly, or a phone-side send) rather than fighting the file picker again.
+
+**Separate bugs noticed along the way (not fixed, not part of this task)** — all look like the
+same root cause: something silently swallows a `LateInitializationError` from an unguarded
+`Database`/ObjectBox call on web, leaving the awaiting UI parked in an infinite spinner instead
+of erroring or completing:
+- The conversation list sidebar does not respond to scroll (mouse wheel, click-drag) at all —
+  chats past the visible viewport are simply unreachable from the sidebar.
+- Message search (search icon → type a query → submit) shows an indefinite spinner and never
+  returns results or a "no results" state.
+- Starting a "New Message" to a name/number that matches an *existing* conversation with more
+  than the two participants tried (e.g. a 3+ person group chat) gets stuck forever on "Loading
+  surrounding message context..." (`lib/app/layouts/conversation_view/pages/messages_view.dart`).
+  A fresh 1:1 chat (no existing match) does not hit this — it's specific to jumping into
+  pre-existing message context.
+Console repeatedly logged (unprompted, on a timer) `LateInitializationError: Field 'messages' has
+not been initialized`, `LateInitializationError: Field 'store' has not been initialized`, and a
+failing `Incremental Chat Sync`/`IncomingMessageHandler` — all consistent with recurring
+background sync code that isn't `kIsWeb`-guarded the way the contacts sync now is. Worth a
+dedicated session; did not chase this further since it's outside today's attachment-focused
+scope.
 
 ### Contacts not loading/displaying on web — fixed and verified live
 (Reported by the user during this same debugging pass; separate from the three
@@ -175,4 +242,11 @@ visually, not just noisy in the console.
 
 1. ~~Verify the chat-list sort fix live, commit, push.~~ Done.
 2. ~~Contacts — apply the fixes already identified above.~~ Done, verified live.
-3. Photo downloading — not investigated at all yet. Next up.
+3. Photo downloading — one real bug found and fixed (auto-download-off path), see above.
+   The default (auto-download-on) path was reviewed by hand and looks correct but was never
+   exercised against a real image in the browser this session. Get a real attached photo into
+   a test chat (see notes above on why the file picker couldn't be automated) and confirm the
+   `Image.memory` render actually works end to end before calling this fully verified.
+4. New: the scroll/search/"loading surrounding context" hangs noted above — likely one shared
+   root cause (an unguarded `Database` call on web whose `LateInitializationError` is silently
+   swallowed). Not part of today's attachment work; worth its own session.

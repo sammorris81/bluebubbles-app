@@ -144,16 +144,7 @@ class AttachmentsService extends GetxService {
     }
 
     if (kIsWeb || attachment.guid == null) {
-      if (attachment.bytes == null && (autoDownload ?? SettingsSvc.settings.autoDownload.value)) {
-        // Only start a download when there is actually a GUID to request from the server.
-        // Pre-picked / ephemeral attachments (guid == null) cannot be downloaded; returning
-        // the bare Attachment here will show a placeholder in the UI rather than crashing.
-        if (attachment.guid != null) {
-          return AttachmentDownloader.startDownload(attachment, onComplete: onComplete);
-        }
-        // No GUID and no bytes — return a PlatformFile with whatever path is available.
-        return PlatformFile(name: attachment.transferName!, path: path, size: attachment.totalBytes ?? 0);
-      } else {
+      if (attachment.bytes != null) {
         return PlatformFile(
           name: attachment.transferName!,
           path: path,
@@ -161,6 +152,19 @@ class AttachmentsService extends GetxService {
           bytes: attachment.bytes,
         );
       }
+      // Pre-picked / ephemeral attachments (guid == null) can never be downloaded regardless
+      // of the auto-download setting, so they always get this empty placeholder rather than
+      // a bare Attachment.
+      if (attachment.guid == null) {
+        return PlatformFile(name: attachment.transferName!, path: path, size: attachment.totalBytes ?? 0);
+      }
+      if (autoDownload ?? SettingsSvc.settings.autoDownload.value) {
+        return AttachmentDownloader.startDownload(attachment, onComplete: onComplete);
+      }
+      // Auto-download is off and nothing is cached yet. Fall through to the bare Attachment
+      // so loadAttachmentContent() shows the tap-to-download affordance instead of a
+      // permanently blank, untappable "resolved" file.
+      return attachment;
     }
 
     final pathName = path ?? attachment.path;
