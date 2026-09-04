@@ -239,38 +239,37 @@ Future<void> showConversationTileMenu(
       tapPosition.dy,
     ),
     items: <PopupMenuEntry>[
-      if (!kIsWeb)
-        PopupMenuItem(
-          padding: EdgeInsets.zero,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () {
-              final chatState = ChatsSvc.getChatState(chat.guid);
-              ChatsSvc.setChatPinned(chatState?.chat ?? chat, !chat.isPinned!);
-              Navigator.pop(context);
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 15.0, vertical: 12.0),
-              child: Row(
-                children: <Widget>[
-                  Padding(
-                    padding: const EdgeInsets.only(right: 10),
-                    child: Icon(
-                      chat.isPinned!
-                          ? (ios ? CupertinoIcons.pin_slash : Icons.star_outline)
-                          : (ios ? CupertinoIcons.pin : Icons.star),
-                      color: context.theme.colorScheme.onSurfaceVariant,
-                    ),
+      PopupMenuItem(
+        padding: EdgeInsets.zero,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            final chatState = ChatsSvc.getChatState(chat.guid);
+            ChatsSvc.setChatPinned(chatState?.chat ?? chat, !chat.isPinned!);
+            Navigator.pop(context);
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 15.0, vertical: 12.0),
+            child: Row(
+              children: <Widget>[
+                Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: Icon(
+                    chat.isPinned!
+                        ? (ios ? CupertinoIcons.pin_slash : Icons.star_outline)
+                        : (ios ? CupertinoIcons.pin : Icons.star),
+                    color: context.theme.colorScheme.onSurfaceVariant,
                   ),
-                  Text(
-                    chat.isPinned! ? "Unpin" : "Pin",
-                    style: textTheme.bodyLarge!.copyWith(color: context.theme.colorScheme.onSurfaceVariant),
-                  ),
-                ],
-              ),
+                ),
+                Text(
+                  chat.isPinned! ? "Unpin" : "Pin",
+                  style: textTheme.bodyLarge!.copyWith(color: context.theme.colorScheme.onSurfaceVariant),
+                ),
+              ],
             ),
           ),
         ),
+      ),
       if (!kIsWeb)
         PopupMenuItem(
           padding: EdgeInsets.zero,

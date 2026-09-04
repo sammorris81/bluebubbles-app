@@ -76,6 +76,16 @@ Future<Null> initApp(bool bubble, List<String> arguments) async {
       html.document.documentElement?.setAttribute('data-bb-debug', 'true');
     }
 
+    // Suppresses the browser's native right-click menu app-wide so Flutter's own
+    // PopupMenu (chat tile / message / settings context menus) can show instead.
+    // Registered once, up front, rather than per-widget via `onContextMenu.first` —
+    // that pattern raced the browser's real event order (contextmenu fires before
+    // the mouseup that drives Flutter's onSecondaryTapUp), so it always suppressed
+    // the *next* right-click's native menu instead of the one that triggered it.
+    if (kIsWeb) {
+      html.document.onContextMenu.listen((event) => event.preventDefault());
+    }
+
     /* ----- DESKTOP NATIVE SPLASH STATUS ----- */
     // Pushes startup status to the native splash; detached once it's dismissed.
     void Function()? detachSplashStatus;
