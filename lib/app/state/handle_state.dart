@@ -123,7 +123,13 @@ class HandleState {
     // freshly-fetched handle whose contactsV2 ToMany lazily re-queries the DB.
     handle = refreshed;
 
-    updateDisplayNameInternal(handle.displayName);
+    // updateDisplayNameInternal is last: ChatState's `ever(hs.displayName, ...)`
+    // listener fires synchronously and recomputes the group-chat creator subtitle
+    // from reactionDisplayName/formattedAddress (see ChatState._computeCreatorSubtitle
+    // / _shortNameFor). Firing that listener before those fields are updated below
+    // made it recompute against stale (pre-contact-sync) values, so group chat titles
+    // never picked up a newly-matched contact even though displayName itself, and
+    // every other observer of it, updated correctly.
     _recomputeReactionDisplayName();
     updateInitialsInternal(handle.initials);
     updateAvatarPathInternal(_resolveAvatarPath(handle));
@@ -132,6 +138,7 @@ class HandleState {
     updateDefaultEmailInternal(handle.defaultEmail);
     updateDefaultPhoneInternal(handle.defaultPhone);
     updateFormattedAddressInternal(handle.formattedAddress ?? handle.address);
+    updateDisplayNameInternal(handle.displayName);
 
     // Re-apply redaction over the fresh values if redacted mode is active
     if (SettingsSvc.settings.redactedMode.value) {

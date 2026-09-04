@@ -173,6 +173,45 @@ background sync code that isn't `kIsWeb`-guarded the way the contacts sync now i
 dedicated session; did not chase this further since it's outside today's attachment-focused
 scope.
 
+### Group chat titles not resolving to contact names — fixed and verified live (affects ALL platforms)
+(Follow-up to the contacts fix below. Reported by the user: `+16087990697` and
+`+19204122065` — the second participant in two different group chats — never
+resolved to a name, even though the matching contact ("Angela House", "Timothy Dale")
+genuinely existed and every 1:1 chat's contact resolution worked fine.)
+
+**Not a web-only bug.** Root cause is in `lib/app/state/handle_state.dart`, which is
+shared, platform-agnostic code — this affects native and desktop too, just harder to
+hit there since a full contact sync usually completes before any UI renders.
+
+Root cause: `HandleState.updateFromHandle()` called `updateDisplayNameInternal()`
+*first*, before `_recomputeReactionDisplayName()` and `updateFormattedAddressInternal()`.
+`ChatState`'s `ever(hs.displayName, ...)` listener (which recomputes the chat title)
+fires *synchronously* the instant `displayName` changes — so by the time it ran,
+`reactionDisplayName` and `formattedAddress` hadn't been updated yet. For a 1:1 chat
+this didn't matter (`_computeTitle()`'s DM branch reads `displayName.value` directly,
+already fresh). For a **group** chat, `_computeTitle()` falls back to
+`chatCreatorSubtitle`, computed by `_computeCreatorSubtitle()` → `_shortNameFor()`,
+which reads `reactionDisplayName.value` — still the *stale* pre-sync value at the
+moment the listener ran. Nothing ever re-triggered the computation afterward once
+`reactionDisplayName` caught up, since no listener was bound to *that* field.
+
+Diagnosed by temporarily instrumenting the full chain (contact fetch → address
+normalization → handle matching → `HandleState`/`ChatState` update) with targeted
+logging for the two affected numbers, live in the browser. This proved, in order:
+the contact *was* being fetched from the server correctly (including a same-person
+duplicate under two source IDs — a numeric one and a macOS `ABPerson` UUID, itself
+just a server-side dedup quirk, not a client bug); the address-normalization/matching
+logic *did* find and attach the right contact to the right `Handle` object (verified
+by object identity, not just address, across the whole pipeline); `HandleState`'s
+`displayName` *did* update to the correct name and its `ever()` listener *did* fire —
+but `_computeCreatorSubtitle()` inside that listener read a different, not-yet-updated
+field. Fixed by reordering `updateFromHandle()` so `updateDisplayNameInternal()` —
+the one field `ChatState` listens on — runs *last*, after every other field it might
+transitively depend on.
+
+**Verified live**: after the fix, "Adam & +16087990697" now reads "Adam & Angela" and
+"Adam & +19204122065" now reads "Adam & Timothy" — no console errors.
+
 ### Contacts not loading/displaying on web — fixed and verified live
 (Reported by the user during this same debugging pass; separate from the three
 original bugs but discovered along the way.)
