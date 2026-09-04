@@ -435,6 +435,50 @@ this reproduces independent of the `Database.chats` fix above. Likely not
 web-specific (the widget isn't platform-gated) — worth checking on native/desktop
 before spending time on it.
 
+### Pin/mute/archive reset on page reload — fixed (web-only localStorage persistence)
+User noticed after the pin-on-web fix above: pinning a chat worked, but didn't
+survive a page reload. Root cause: pin/mute/archive have never been synced to the
+BlueBubbles server on *any* platform (confirmed by reading `ChatInterface.saveChat`
+→ `ChatActions.saveChat` — it's a pure local-DB write, no HTTP call) — they're
+purely per-device settings, persisted via the local ObjectBox DB on native/desktop.
+Web has no local DB, so `Chat.saveAsync()`/`save()` were no-ops there, meaning this
+state only ever lived in memory for the page session.
+
+Fix, in `lib/database/html/chat.dart` (the file `database/html/CLAUDE.md` calls
+"read-only stubs" — but this file already carries substantial real web-specific
+logic beyond a stub, e.g. `webSyncParticipants`, so extending it here is consistent
+with its actual content, not a new precedent):
+- Added a small private `_WebChatOverrides` helper backed by `html.window.localStorage`
+  (key `bb_web_chat_overrides`), storing a JSON map of `guid -> {isPinned, pinIndex,
+  isArchived, muteType, muteArgs}`. A chat's entry is written whenever any of those
+  fields differ from default, and removed entirely once they're all back to default
+  (keeps storage from growing unbounded with stale entries).
+- `Chat.fromMap()` calls `_WebChatOverrides.apply(chat)` after construction, so any
+  chat loaded from the server picks up its persisted local override.
+- `save()` and `saveAsync()` both call `_WebChatOverrides.save(this)` unconditionally
+  — simpler and more robust than threading through the per-field `updateXxx` flags,
+  and correctly covers every call path (the three toggle methods, plus pin-index
+  drag-reorder via `ChatsSvc.setChatPinIndex`, plus the sync toggle variants used
+  internally for temporary-mute auto-expiry).
+- This is scoped to `localStorage`, so it's per-browser only (not synced across
+  devices/browsers) — the same "per-device" characteristic these settings already
+  have natively, just narrowed one level further to "per-browser."
+
+Also un-gated the Mute and Archive items in the right-click menu
+(`showConversationTileMenu`, `lib/helpers/ui/ui_helpers.dart`) for web, matching the
+Pin item fixed earlier — there was no point persisting mute/archive state if there
+was no web UI to ever set it. Archived chats are already reachable on web via the
+existing "..." overflow menu → Archived (not platform-gated), so unarchiving a
+chat someone archives on web isn't a dead end.
+
+**Verified live**: pinned "Sam Morris", muted "+1 64357", and archived
+"+1 833-315-1158", confirmed all three in `localStorage`
+(`{"any;-;+19193574218":{"isPinned":true},"any;-;64357":{"muteType":"mute"},...}`),
+then did a real page reload (fresh `navigate`, not hot restart) — all three
+persisted correctly: pin still at top, mute icon still showing on the tile, and the
+archived chat still absent from the main list but present under Archived. Reversed
+all three afterward and confirmed the `localStorage` entry cleared back to `{}`.
+
 ## Suggested order to keep working
 
 1. ~~Verify the chat-list sort fix live, commit, push.~~ Done.

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:bluebubbles/services/backend/interfaces/chat_interface.dart';
 import 'package:bluebubbles/utils/logger/logger.dart';
@@ -12,6 +13,55 @@ import 'package:bluebubbles/services/services.dart';
 import 'package:faker/faker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
+import 'package:universal_html/html.dart' as html;
+
+/// Pin/mute/archive are purely local-device settings on every platform —
+/// `Chat.saveAsync()` never makes a server call for them, even natively, it
+/// only writes to the local ObjectBox DB. Web has no local DB, so without
+/// this they silently reset on every page reload. Backed by `localStorage`,
+/// scoped to this browser only (matching the fact that these settings are
+/// already per-device, not account-wide, on every other platform).
+class _WebChatOverrides {
+  static const _key = 'bb_web_chat_overrides';
+
+  static Map<String, dynamic> _readAll() {
+    final raw = html.window.localStorage[_key];
+    if (raw == null) return {};
+    try {
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (e) {
+      Logger.warn('Failed to parse stored chat overrides, resetting', tag: 'WebChatOverrides');
+      return {};
+    }
+  }
+
+  static void save(Chat chat) {
+    final all = _readAll();
+    final override = <String, dynamic>{
+      if (chat.isPinned == true) 'isPinned': true,
+      if (chat.pinIndex != null) 'pinIndex': chat.pinIndex,
+      if (chat.isArchived == true) 'isArchived': true,
+      if (chat.muteType != null) 'muteType': chat.muteType,
+      if (chat.muteArgs != null) 'muteArgs': chat.muteArgs,
+    };
+    if (override.isEmpty) {
+      all.remove(chat.guid);
+    } else {
+      all[chat.guid] = override;
+    }
+    html.window.localStorage[_key] = jsonEncode(all);
+  }
+
+  static void apply(Chat chat) {
+    final override = _readAll()[chat.guid] as Map<String, dynamic>?;
+    if (override == null) return;
+    chat.isPinned = override['isPinned'] as bool? ?? false;
+    chat.pinIndex = override['pinIndex'] as int?;
+    chat.isArchived = override['isArchived'] as bool? ?? false;
+    chat.muteType = override['muteType'] as String?;
+    chat.muteArgs = override['muteArgs'] as String?;
+  }
+}
 
 String getFullChatTitle(Chat _chat) {
   String? title = "";
@@ -161,7 +211,7 @@ class Chat {
 
   factory Chat.fromMap(Map<String, dynamic> json) {
     final message = json['lastMessage'] != null ? Message.fromMap(json['lastMessage']) : null;
-    return Chat(
+    final chat = Chat(
       id: json["ROWID"] ?? json["id"],
       guid: json["guid"],
       chatIdentifier: json["chatIdentifier"],
@@ -189,6 +239,8 @@ class Chat {
       dynamicWallpaperId: json["dynamicWallpaperId"],
       dynamicWallpaperConfig: json["dynamicWallpaperConfig"],
     );
+    _WebChatOverrides.apply(chat);
+    return chat;
   }
 
   Chat save({
@@ -209,6 +261,7 @@ class Chat {
     bool updateLockChatIcon = false,
     bool updateLastReadMessageGuid = false,
   }) {
+    _WebChatOverrides.save(this);
     // ignore: argument_type_not_assignable, return_of_invalid_type, invalid_assignment, for_in_of_invalid_element_type
     WebListeners.notifyChat(this);
     return this;
@@ -239,6 +292,7 @@ class Chat {
     bool updateCustomThemes = false,
     bool updateWallpaperSettings = false,
   }) async {
+    _WebChatOverrides.save(this);
     return this;
   }
 
