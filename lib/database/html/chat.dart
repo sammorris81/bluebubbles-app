@@ -628,7 +628,7 @@ class Chat {
   /// chats directly from the server's `/chat/query` endpoint instead.
   static Future<List<Chat>> getChatsAsync({int limit = 15, int offset = 0, List<int> ids = const []}) async {
     final response = await HttpSvc.chat.query(
-      withQuery: const ["participants"],
+      withQuery: const ["participants", "lastmessage"],
       offset: offset,
       limit: limit,
     );

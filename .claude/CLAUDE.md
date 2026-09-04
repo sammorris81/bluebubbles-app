@@ -8,6 +8,12 @@ Detailed coding standards live in `.claude/rules/`:
 - `services.md` — service access, event dispatch, method channels, navigation
 - `git.md` — commit message format
 
+## In-Progress Work
+- `.claude/WEB_CLIENT_DEBUGGING.md` — status of an active effort to get the deprecated
+  web client (`flutter run -d web-server`) working for live bug debugging: what's
+  fixed, what's root-caused but not fixed, and the git remote setup (fork-only, no
+  upstream PRs). Check this before starting web-related work.
+
 ## Architecture & Design Decisions
 - `docs/ARCHITECTURE.md` — how the system's major subsystems work and interact
 - `docs/DECISIONS.md` — why key design choices were made (isolate pattern, GetIt vs GetX, ChatState, etc.)
