@@ -347,6 +347,94 @@ and every `Image.network` call site in the link-preview widgets
 `errorBuilder`/`onError` fallback. No action needed unless it starts looking broken
 visually, not just noisy in the console.
 
+### Pin chats via right-click — fixed and verified live (feature was disabled, not broken)
+User asked how to pin favorite chats on web (works on Android). Investigation found the
+entire pin data path already worked cross-platform — `ChatState.isPinned`/`pinIndex`,
+`ChatsSvc.setChatPinned`, `Chat.togglePinAsync`, and the chat-list sort/section logic in
+`chats_service.dart` and `database/html/chat.dart` all handle it fine. The right-click
+menu item itself was just gated `if (!kIsWeb)` in `showConversationTileMenu`
+(`lib/helpers/ui/ui_helpers.dart`), alongside Mute/Archive/Delete. Removed the gate for
+Pin only (left Mute/Archive/Delete gated — out of scope for this ask).
+
+Note: on web there's no local ObjectBox DB, so `Chat.saveAsync()` is a no-op there —
+pin state lives only in the in-memory `Chat`/`ChatState` for the session and resets on
+page reload/hot-restart. This mirrors how mute/archive/etc. already behave on web, so
+it wasn't treated as a blocker.
+
+**Found and fixed along the way — a real bug affecting every web right-click menu,
+not just this one**: `onSecondaryTap` handlers (`conversation_tile.dart`,
+`message_popup_holder.dart`, `settings_tile.dart`) each independently did
+`if (kIsWeb) { (await html.document.onContextMenu.first).preventDefault(); }` before
+showing their popup. This races the browser's real event order — Chromium fires the
+native `contextmenu` DOM event *before* the `mouseup` that drives Flutter's
+`onSecondaryTapUp` — so by the time each handler started listening, the event it
+wanted had already passed. It always ended up suppressing the *next* right-click's
+native menu instead of the one that triggered it, so every web context menu
+(chat tile, message popup, settings tile) required two right-clicks: the first
+click's popup only appeared once a second right-click's `contextmenu` event resolved
+the stale listener. Confirmed live in the browser — reproduced the two-click
+requirement, then confirmed a single click works after the fix.
+
+Fix: replaced the three per-widget racy listeners with one global
+`html.document.onContextMenu.listen((event) => event.preventDefault())` registered
+once in `main.dart`'s `kIsWeb` startup block, so the browser's native menu is
+suppressed app-wide up front rather than reactively per right-click.
+
+**Verified live** against `http://10.7.12.13:8090/web`: single right-click on a chat
+tile now shows Pin/Mark Unread immediately; clicking Pin moves the chat into the
+pinned section at the top with correct avatar/name rendering; Unpin round-trips back.
+
+### Message search hang — root-caused and fixed (one of two causes; local search still N/A on web)
+This confirms item 5 below: user reported a search for a contact name ("Lisa") never
+returned anything. Root cause found in `SearchQueryHelper.runNetwork`
+(`lib/app/layouts/conversation_list/pages/search/search_query_helper.dart`): after
+fetching results from the server, it unconditionally ran
+`Database.chats.query(Chat_.guid.oneOf(chatGuids)).build().find()` to swap in the
+locally-cached `Chat` objects — on web `Database.chats` is an uninitialized `late
+final` (no ObjectBox), so this threw `LateInitializationError` on every network
+search. `search_view.dart`'s `search()` awaited this with no try/catch, so the
+exception left `isSearching` stuck at `true` forever — an indefinite spinner with no
+error surfaced, matching the originally reported symptom exactly. (Web has no local
+search toggle — `local.value` defaults to `false` and `local_search_web.dart` is a
+stub — so every web search goes through this `runNetwork` path.)
+
+Fix:
+- `search_query_helper.dart`: on `kIsWeb`, look up each chat via
+  `ChatsSvc.getChatState(guid)?.chat` (in-memory, already hydrated from the server)
+  instead of querying `Database.chats`.
+- `search_view.dart`: wrapped the local/network search calls in `search()` in a
+  try/catch that logs via `Logger.error(...)` — a defensive fix so any *other* future
+  exception on this path fails visibly (empty results) instead of hanging the spinner
+  forever again.
+
+**Verified live**: searching "Lisa" now returns real matches instantly (chat titles
+and message snippets with "Lisa" highlighted), confirmed against
+`http://10.7.12.13:8090/web` after a hot restart.
+
+**Search filters verified correct** (user asked specifically): tested all four —
+From You / Not From You (produce correct, distinct complementary result sets —
+confirmed by comparing which specific messages appear in each), Filter by Chat
+(restricts correctly to only the selected chat's matches), and Filter by Date
+(a "since 9/4/2025" filter correctly excluded all older matches). All results were
+verified against the actual message content/dates shown, not just "some results
+appeared." No filter correctness issues found.
+
+**Separate, not-fixed, likely-not-web-specific UI quirk noticed while testing**: the
+small arrow "submit" button next to the search field (`ConversationSearchField`,
+`lib/app/layouts/conversation_list/pages/search/conversation_search_field.dart`)
+often needs two clicks to register after selecting a filter chip — the first click
+does nothing visible, the second submits. Reproduced consistently in the browser.
+Tried changing its `suffixMode` from `OverlayVisibilityMode.editing` to `.always`
+(theory: losing focus when the filter panel opens hides/disables the suffix), but
+the double-click requirement persisted identically even with the button already
+visible, so that theory was wrong and the change was reverted (see git history if
+picking this up — not worth guessing further without deeper investigation into
+`CupertinoTextField`'s internal gesture arena for its `suffix` slot). Does not block
+search — pressing Enter/Return in the field submits reliably on the first try, and
+this reproduces independent of the `Database.chats` fix above. Likely not
+web-specific (the widget isn't platform-gated) — worth checking on native/desktop
+before spending time on it.
+
 ## Suggested order to keep working
 
 1. ~~Verify the chat-list sort fix live, commit, push.~~ Done.
