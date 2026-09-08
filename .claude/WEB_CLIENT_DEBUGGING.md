@@ -78,6 +78,56 @@ There is no committed collector script for that endpoint — write a small local
 server if you want to use it again (a `ThreadingHTTPServer` that just logs the POST body
 is enough); it isn't part of the repo since it's a personal debugging aid, not app code.
 
+## The two web failure modes, and how to tell them apart
+
+Almost every web-only bug found so far is one of two shapes. Recognising which one you are
+looking at from the symptom alone saves a lot of time.
+
+### 1. `UnsupportedError: Platform._operatingSystem` — bare `dart:io`
+
+Reading `Platform.isAndroid` (or any `Platform.isX`) throws on web, but **only if the file
+imports bare `dart:io`**. DDC compiles `dart:io` against a stub whose `_Platform._operatingSystem()`
+unconditionally throws (`dart-sdk/lib/_internal/js_runtime/lib/io_patch.dart`). If it throws in
+`build()`/`initState()`, Flutter's error boundary swallows it and the pane renders the
+"Something went wrong" box from `custom_error_box.dart`.
+
+**The count of `Platform.is*` reads in `lib/` is badly misleading.** There are ~141, but 137 are
+in files importing `package:universal_io/io.dart`, whose `Platform` **cannot throw** — it sniffs
+`navigator.userAgent` instead (`_helpers_impl_browser.dart`). Only ~28 reads across 12 files use
+bare `dart:io`, and all 28 were audited: one was a real crash (Notification Providers, fixed),
+one throws into a `try/catch` (`foreground_service_helpers.dart`, fires only on server-URL
+save/clear), and the other 26 are short-circuited by a guard or unreachable on web. So before
+"fixing" a `Platform.is*` read, **check which `io` library the file imports** — most need nothing.
+
+Corollary worth knowing: because universal_io reports the *browser's host OS*, `Platform.isMacOS`
+is `true` in the web client when Chrome runs on a Mac. That never crashes, but it means a handful
+of sites take a desktop branch on web. All 34 such reads were checked and none currently misbehave
+— though four are safe only by second-order accident (e.g. `themes_service.dart:678` calls
+`_applyWindowsAccent` on a Windows browser, which happens to early-return because
+`desktopAccentColor` is only assigned behind `kIsDesktop`). A refactor could turn any of those
+into a real bug without touching the line itself.
+
+### 2. `LateInitializationError` — uninitialized `late` fields
+
+Web skips whole init paths, leaving `late` fields permanently unassigned:
+
+- `FilesystemService.init()` assigns `appDocDir` only under `!kIsWeb`, so `appDocDir` **and every
+  path getter derived from it** (`logsPath`, `attachmentsPath`, `avatarsPath`, `soundsPath`,
+  `fontPath`, …) throw.
+- `Database.store` and every `Box` (`messages`, `chats`, `handles`, …) are never initialized —
+  web has no ObjectBox at all.
+
+The symptom depends on *where* it throws, and this is the useful part:
+
+| Where it throws | What you see |
+|---|---|
+| Synchronously in `build()`/`initState()` | The "Something went wrong" error box |
+| In an awaited async call whose error escapes before a `loading = false` | **Infinite spinner, no error** |
+
+The second case is the one that reads as "this feature is broken/slow" rather than "this crashed",
+and it is the family behind most remaining open items. When you hit an infinite spinner, go
+straight to the console — the stack trace names the real culprit.
+
 ## Git setup for this work
 
 This repo only has **read** access to `BlueBubblesApp/bluebubbles-app` upstream.
@@ -198,13 +248,18 @@ of erroring or completing:
 - ~~The conversation list sidebar does not respond to scroll (mouse wheel, click-drag) at all —
   chats past the visible viewport are simply unreachable from the sidebar.~~ **Not a bug — this
   was a tooling artifact.** See "Sidebar scroll — investigated, no bug found" below.
-- Message search (search icon → type a query → submit) shows an indefinite spinner and never
-  returns results or a "no results" state.
+- ~~Message search (search icon → type a query → submit) shows an indefinite spinner and never
+  returns results or a "no results" state.~~ **Fixed** — see "Message search hang" below.
 - Starting a "New Message" to a name/number that matches an *existing* conversation with more
   than the two participants tried (e.g. a 3+ person group chat) gets stuck forever on "Loading
   surrounding message context..." (`lib/app/layouts/conversation_view/pages/messages_view.dart`).
   A fresh 1:1 chat (no existing match) does not hit this — it's specific to jumping into
   pre-existing message context.
+
+One more member of this family has since been identified and fixed: the **Custom Groups settings
+panel** (see "Settings panels swept" below). Its cause is the exact shape described here — an
+unguarded `Database` call whose `LateInitializationError` escapes before the `loading` flag is
+reset. That one is a useful worked example if you pick up the remaining item above.
 Console repeatedly logged (unprompted, on a timer) `LateInitializationError: Field 'messages' has
 not been initialized`, `LateInitializationError: Field 'store' has not been initialized`, and a
 failing `Incremental Chat Sync`/`IncomingMessageHandler` — all consistent with recurring
@@ -587,6 +642,47 @@ being processed cleanly with no `LateInitializationError` and no "no DB record y
 buffering" loop (confirmed by contrast against a run on the pre-fix build, which showed
 exactly that loop, once per 10s, forever, for the same kind of event).
 
+### Settings panels swept — three fixed, rest verified clean
+
+Every settings panel and subpanel was checked on web, both statically (all 131 files under
+`lib/app/layouts/settings/` scanned for `appDocDir`-derived paths, `Database.*`, `File`/`Directory`,
+`Logger.logDir`) and live in the browser with the console cleared between checks. Three were broken;
+everything else renders or degrades gracefully.
+
+**Fixed:**
+
+- **Notification Providers — error box.** `Platform.isAndroid` read from a bare `dart:io` import to
+  gate the Android-only Background Service toggle. Failure mode 1 above. Guarded with `!kIsWeb`.
+  Note the fix is *not* to switch the import to universal_io: that would report `isAndroid` true in
+  an Android browser and surface a toggle backed by a method channel web doesn't have.
+- **Developer Tools — error box.** `_refreshLogStats()` ran unconditionally from `initState` and
+  reached `appDocDir` via `Logger.logDir`. Failure mode 2, synchronous variant. Also hid the Clear
+  Logs tile on web: `Logger.clearLogs()` hits the same field inside its own `try/catch`, so it
+  silently did nothing while still reporting "All logs have been deleted".
+- **Custom Groups — infinite spinner.** `CustomGroupInterface.getAll()` goes straight to ObjectBox
+  with no web path; the `LateInitializationError` escaped `loadGroups()` before `loading.value` was
+  reset. Failure mode 2, async variant — **this was one of the unexplained infinite spinners noted
+  below.** Guarded `getAll()` (which also covers `custom_groups_backup.dart`) and hid the tile,
+  since custom groups are ObjectBox-only and cannot work on web at all. Worth noting
+  `CustomGroupsService.refresh()` already had exactly the right guard — only the settings
+  controller was missing it, which is a good place to look for similar near-misses.
+
+**Verified clean:** all 16 top-level panels plus Logs, Soft-Deleted Chats, Handle Audit, iMessage
+Stats, Google Firebase, Unified Push, Changelog, Developers, Keyboard Shortcuts, About. Several
+already degrade deliberately (iMessage Stats shows "Local DB stats are unavailable on web builds";
+Soft-Deleted Chats and Handle Audit early-return on web). The theming subpanels are `kIsWeb`-gated
+and unreachable on web.
+
+**Left alone, non-blocking:**
+
+- **View Latest Log** logs `Error reading logs: LateInitializationError: Field 'appDocDir'…` but
+  catches it and correctly renders "No logs to display". Right outcome, noisy path.
+- The **Keyboard Shortcuts** dialog logs a `RenderFlex overflowed by 32 pixels on the right`.
+  Cosmetic and does not look web-specific.
+- Several panels have web-unsafe code in `onTap` handlers only — font upload, the notification
+  sound pickers in Conversation/Desktop settings, backup file writes. These fail on interaction,
+  not render, and were not triggered (they would write to real config).
+
 ### Sidebar scroll — investigated, no bug found (was a tooling artifact)
 Carried forward as an open bug from the attachment session's "noticed along the way" list:
 "the conversation list sidebar does not respond to scroll (mouse wheel, click-drag) at all."
@@ -638,3 +734,8 @@ neither is web-specific — worth knowing about if this area is touched again:
    bug at all (see "Sidebar scroll — investigated, no bug found"). The remaining item is the
    "New Message" → existing 3+ person group chat hang on "Loading surrounding message context",
    which still looks like the unguarded-`Database`-call-on-web family.
+6. ~~Sweep every settings panel and subpanel for the two failure modes.~~ Done — three fixed
+   (Notification Providers, Developer Tools, Custom Groups), rest verified clean live. See
+   "Settings panels swept". The same sweep has **not** been done for the conversation view,
+   conversation details, chat creator, or setup flows; those are the obvious next targets, and
+   the failure-mode table above is the fastest way to triage what you find.
