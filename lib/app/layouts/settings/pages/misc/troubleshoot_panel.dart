@@ -66,6 +66,11 @@ class _TroubleshootPanelState extends State<TroubleshootPanel> with ThemeHelpers
   }
 
   void _refreshLogStats() {
+    // Web has no file-backed logging: Logger.init() skips creating the log directory,
+    // and FilesystemSvc.appDocDir (which Logger.logDir resolves through) is never
+    // assigned, so reading it throws a LateInitializationError.
+    if (kIsWeb) return;
+
     int count = 0;
     int sizeKb = 0;
 
@@ -239,8 +244,9 @@ class _TroubleshootPanelState extends State<TroubleshootPanel> with ThemeHelpers
                           }
                           await launchUrl(Uri.file(logFile.path));
                         }),
-                  const SettingsDivider(padding: EdgeInsets.only(left: 16.0)),
-                  SettingsTile(
+                  if (!kIsWeb) const SettingsDivider(padding: EdgeInsets.only(left: 16.0)),
+                  if (!kIsWeb)
+                    SettingsTile(
                       leading: const SettingsLeadingIcon(
                         iosIcon: CupertinoIcons.trash,
                         materialIcon: Icons.delete,
