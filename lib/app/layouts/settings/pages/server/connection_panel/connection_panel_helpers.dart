@@ -325,11 +325,7 @@ mixin ConnectionPanelHelpersMixin {
     IncrementalSyncManager? Function() getManager,
     void Function(IncrementalSyncManager?) setManager,
   ) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SettingsHeader(iosSubtitle: iosSubtitle, materialSubtitle: materialSubtitle, text: "Connection & Sync"),
-        Obx(() => SettingsSection(
+    Widget buildSection() => SettingsSection(
           backgroundColor: tileColor,
           children: [
             SettingsTile(
@@ -600,7 +596,13 @@ mixin ConnectionPanelHelpersMixin {
                 ),
               ),
           ],
-        )),
+        );
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SettingsHeader(iosSubtitle: iosSubtitle, materialSubtitle: materialSubtitle, text: "Connection & Sync"),
+        kIsWeb ? buildSection() : Obx(buildSection),
       ],
     );
   }
