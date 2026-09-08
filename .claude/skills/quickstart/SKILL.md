@@ -66,6 +66,12 @@ Fastest way to see a change without a full native build, but has sharp edges —
   the task specifically needs them.
 - `read_console_messages` **always** needs a tight `pattern` — the console is
   flooded with unrelated startup/sync logs.
+- The `computer` tool's `scroll` action **does not scroll Flutter web** — its synthetic
+  scroll never reaches Flutter's pointer pipeline, so nothing moves anywhere in the app
+  and it looks like the list is broken. Dispatch a real `WheelEvent` at
+  `flt-glass-pane` via `javascript_tool` instead; see
+  `.claude/WEB_CLIENT_DEBUGGING.md` → "How to run it" for the snippet and the
+  screenshot-coordinate conversion.
 - After a hot restart, navigate/reload the tab and wait ~8-10s before checking
   anything — the app takes a moment to reinitialize services after restart.
 - Prefer `browser_batch` over sequential single calls when you can predict two or

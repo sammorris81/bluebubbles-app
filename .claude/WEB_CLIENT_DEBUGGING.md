@@ -12,7 +12,7 @@ continues; delete it once the effort is closed out.
 flutter run -d web-server --web-hostname 0.0.0.0 --web-port 8090 --no-web-experimental-hot-reload
 ```
 
-Two gotchas that cost time before:
+Three gotchas that cost time before:
 
 - **The app is served at `/web`, not `/`.** `flutter run` prints
   `lib/main.dart is being served at http://0.0.0.0:8090/web`. Hitting `http://<host>:8090/`
@@ -31,6 +31,44 @@ Two gotchas that cost time before:
       --no-web-experimental-hot-reload < /tmp/fltr.fifo > /tmp/flutter_run.log 2>&1 &
   echo R > /tmp/fltr.fifo                    # hot restart
   ```
+
+**Third gotcha, and it invalidates test results: the Claude-in-Chrome `computer` tool's
+`scroll` action does not scroll Flutter web at all.** Its synthetic scroll never reaches
+Flutter's pointer pipeline — instrumenting the widget tree with a root-level `Listener`
+showed *zero* pointer events of any kind (no `PointerSignal`, no `PointerPanZoom`, no
+`PointerMove`) during a `scroll` call, while `left_click` on the same spot logged a
+`PointerDownEvent` normally. Nothing scrolls, anywhere in the app, via that action. It is
+very easy to misread this as "this list is broken" — especially right after opening a chat,
+where the message view auto-scrolls to the bottom on load and the resulting screenshot looks
+like the wheel worked.
+
+To actually test scrolling, dispatch a real `WheelEvent` at Flutter's glass pane with the
+`javascript_tool` (coordinates are CSS pixels, which match Flutter's logical pixels):
+
+```js
+const gp = document.querySelector('flt-glass-pane');
+let consumed;
+for (let i = 0; i < 5; i++) {
+  const ev = new WheelEvent('wheel', {
+    clientX: 226, clientY: 565, deltaY: 120, deltaMode: 0,
+    bubbles: true, cancelable: true, composed: true, view: window,
+  });
+  gp.dispatchEvent(ev);
+  consumed = ev.defaultPrevented;
+}
+consumed; // true means Flutter handled the event
+```
+
+Use a negative `deltaY` to scroll up. Note screenshot
+coordinates are *not* CSS pixels — on this setup the screenshot frame is 1231x980 while
+`window.inner{Width,Height}` is 1159x923, a 1.062x factor. Divide screenshot coordinates by
+that before using them as `clientX`/`clientY`.
+
+Related: **mouse click-drag never scrolls a Flutter list, on web or desktop.** `main.dart`'s
+`scrollBehavior` passes `dragDevices: Platform.isLinux || Platform.isAndroid ? ... : null`,
+and `copyWith(dragDevices: null)` keeps `MaterialScrollBehavior`'s default of
+`{touch, stylus}` — mouse is deliberately excluded by Flutter. That is upstream behavior, not
+a web bug; don't treat "click-drag doesn't scroll" as a symptom.
 
 `web/index.html` has a debug-only JS error forwarder (`<script id="bb-debug-error-forwarder">`)
 gated behind a `data-bb-debug` attribute set in `lib/main.dart`'s `kIsWeb && kDebugMode` block.
@@ -157,8 +195,9 @@ directly, or a phone-side send) rather than fighting the file picker again.
 same root cause: something silently swallows a `LateInitializationError` from an unguarded
 `Database`/ObjectBox call on web, leaving the awaiting UI parked in an infinite spinner instead
 of erroring or completing:
-- The conversation list sidebar does not respond to scroll (mouse wheel, click-drag) at all —
-  chats past the visible viewport are simply unreachable from the sidebar.
+- ~~The conversation list sidebar does not respond to scroll (mouse wheel, click-drag) at all —
+  chats past the visible viewport are simply unreachable from the sidebar.~~ **Not a bug — this
+  was a tooling artifact.** See "Sidebar scroll — investigated, no bug found" below.
 - Message search (search icon → type a query → submit) shows an indefinite spinner and never
   returns results or a "no results" state.
 - Starting a "New Message" to a name/number that matches an *existing* conversation with more
@@ -548,6 +587,42 @@ being processed cleanly with no `LateInitializationError` and no "no DB record y
 buffering" loop (confirmed by contrast against a run on the pre-fix build, which showed
 exactly that loop, once per 10s, forever, for the same kind of event).
 
+### Sidebar scroll — investigated, no bug found (was a tooling artifact)
+Carried forward as an open bug from the attachment session's "noticed along the way" list:
+"the conversation list sidebar does not respond to scroll (mouse wheel, click-drag) at all."
+Investigated directly and **could not reproduce it — the sidebar scrolls correctly.**
+
+How it was established, since "I scrolled and nothing moved" was exactly the false signal that
+created this entry in the first place:
+- Instrumented `cupertino_conversation_list.dart` (the iOS skin is the active one here) with a
+  `Listener` wrapping the sidebar's `ScrollbarWrapper`, logging `onPointerSignal` and
+  `onPointerDown` plus the `iosScrollController`'s live `maxScrollExtent`/`pixels`, and added a
+  second `Listener` at the app root in `main.dart` logging *every* pointer event type.
+- With the Claude-in-Chrome `scroll` action: `onPointerDown` fired on click, but **no pointer
+  event of any kind** was logged for a scroll — at the sidebar or at the app root. The scroll
+  action simply doesn't reach Flutter (see the gotcha under "How to run it").
+- With a real `WheelEvent` dispatched via `javascript_tool`: the sidebar scrolled perfectly.
+  Logs showed `_TransformedPointerScrollEvent` arriving with `hasClients=true`,
+  `maxScrollExtent=17124`, `physics=AlwaysScrollableScrollPhysics`, `axisDirection=down`, and
+  `pixels` advancing `0 → 120 → 240 → 360 → 480` across five ticks, with the list visibly
+  moving in the screenshot. Scrolling back up clamped correctly at `0`, and it worked from the
+  header region, the middle, and the bottom of the sidebar alike.
+
+The "click-drag" half of the original report is upstream Flutter behavior (mouse is not a drag
+device — see "How to run it"), identical on desktop native. So there is nothing web-specific
+here and no fix was made.
+
+Two things reviewed while in here and deliberately left alone, since neither causes this and
+neither is web-specific — worth knowing about if this area is touched again:
+- `material_conversation_list.dart`'s `NotificationListener(onNotification: ...)` returns `true`,
+  which *stops* `ScrollNotification`s from propagating to ancestors rather than merely observing
+  them (`false` is the "keep bubbling" return). Harmless today because nothing above it consumes
+  them, but it is the opposite of what the code reads like it intends.
+- `ScrollbarWrapper` wraps web and desktop in `ImprovedScrolling` from
+  `flutter_improved_scrolling` 0.0.4 with `enableCustomMouseWheelScrolling` left at its default
+  of `false`, so its `onPointerSignal` handler is inert and wheel events pass straight through to
+  the `Scrollable`. It is not in the path for this.
+
 ## Suggested order to keep working
 
 1. ~~Verify the chat-list sort fix live, commit, push.~~ Done.
@@ -558,6 +633,8 @@ exactly that loop, once per 10s, forever, for the same kind of event).
    a test chat (see notes above on why the file picker couldn't be automated) and confirm the
    `Image.memory` render actually works end to end before calling this fully verified.
 4. ~~Contact photos (avatars) not loading.~~ Done, verified live.
-5. New: the scroll/search/"loading surrounding context" hangs noted above — likely one shared
-   root cause (an unguarded `Database` call on web whose `LateInitializationError` is silently
-   swallowed). Not part of today's attachment work; worth its own session.
+5. ~~New: the scroll/search/"loading surrounding context" hangs noted above~~ — partially
+   resolved. Search was root-caused and fixed (see above). Sidebar scroll turned out not to be a
+   bug at all (see "Sidebar scroll — investigated, no bug found"). The remaining item is the
+   "New Message" → existing 3+ person group chat hang on "Loading surrounding message context",
+   which still looks like the unguarded-`Database`-call-on-web family.
