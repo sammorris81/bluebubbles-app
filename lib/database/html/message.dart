@@ -15,6 +15,15 @@ import 'package:get/get.dart';
 enum LineType { meToMe, otherToMe, meToOther, otherToOther }
 
 class Message {
+  /// Web has no local ObjectBox DB to query, so `findOne` (called throughout
+  /// shared backend code, e.g. `IncomingMessageHandler`, without any web
+  /// awareness) is backed by this in-memory registry instead. Populated by
+  /// every `save`/`bulkSave`/`replaceMessage` call below. Returning `null`
+  /// unconditionally here used to make every `updated-message` (delivery/read
+  /// receipts, GUID swaps) look like it had no existing record, so it was
+  /// parked forever instead of applied — see `.claude/WEB_CLIENT_DEBUGGING.md`.
+  static final Map<String, Message> _registry = {};
+
   int? id;
   int? originalROWID;
   String? guid;
@@ -227,6 +236,7 @@ class Message {
     if (handle == null && handleId != null) {
       handle = Handle.findOne(originalROWID: handleId);
     }
+    if (guid != null) _registry[guid!] = this;
     // ignore: argument_type_not_assignable, return_of_invalid_type, invalid_assignment, for_in_of_invalid_element_type
     WebListeners.notifyMessage(this, chat: chat);
     return this;
@@ -238,6 +248,7 @@ class Message {
       if (m.handle == null && m.handleId != null) {
         m.handle = Handle.findOne(originalROWID: m.handleId);
       }
+      if (m.guid != null) _registry[m.guid!] = m;
       // ignore: argument_type_not_assignable, return_of_invalid_type, invalid_assignment, for_in_of_invalid_element_type
       WebListeners.notifyMessage(m, chat: chat);
     }
@@ -250,6 +261,7 @@ class Message {
       if (m.handle == null && m.handleId != null) {
         m.handle = Handle.findOne(originalROWID: m.handleId);
       }
+      if (m.guid != null) _registry[m.guid!] = m;
       // ignore: argument_type_not_assignable, return_of_invalid_type, invalid_assignment, for_in_of_invalid_element_type
       WebListeners.notifyMessage(m);
     }
@@ -261,6 +273,8 @@ class Message {
     if (newMessage.handle == null && newMessage.handleId != null) {
       newMessage.handle = Handle.findOne(originalROWID: newMessage.handleId);
     }
+    if (oldGuid != null) _registry.remove(oldGuid);
+    if (newMessage.guid != null) _registry[newMessage.guid!] = newMessage;
     // ignore: argument_type_not_assignable, return_of_invalid_type, invalid_assignment, for_in_of_invalid_element_type
     WebListeners.notifyMessage(newMessage, tempGuid: oldGuid, chat: chat);
     return newMessage;
@@ -296,7 +310,24 @@ class Message {
   }
 
   static Message? findOne({String? guid, String? associatedMessageGuid}) {
+    if (guid != null) return _registry[guid];
+    if (associatedMessageGuid != null) {
+      return _registry.values.firstWhereOrNull((m) => m.associatedMessageGuid == associatedMessageGuid);
+    }
     return null;
+  }
+
+  /// Registers messages that were loaded some other way (e.g. the web-only
+  /// history sync in `SyncInterface.bulkSyncData`, which builds `Message`
+  /// objects straight from server JSON without going through [save]) so
+  /// [findOne] can still find them later. Without this, a message loaded when
+  /// a chat is opened would never be resolvable by GUID, and a delivery/read
+  /// receipt for it that arrives afterward would buffer forever — the same
+  /// symptom fixed above, just for older messages instead of brand-new ones.
+  static void registerKnown(Iterable<Message> messages) {
+    for (final m in messages) {
+      if (m.guid != null) _registry[m.guid!] = m;
+    }
   }
 
   static List<Message> find() {
@@ -304,6 +335,7 @@ class Message {
   }
 
   static Future<void> delete(String guid) async {
+    _registry.remove(guid);
     return;
   }
 

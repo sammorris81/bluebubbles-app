@@ -25,8 +25,14 @@ class SyncInterface {
       // maps the caller already has instead of hitting the uninitialized
       // Database.messages/chats boxes (LateInitializationError). The only
       // web caller (MessagesService.loadChunk) only reads `.messages`.
+      final messages = messagesData.map((e) => Message.fromMap(e)).toList();
+      // Register with Message.findOne's in-memory index — otherwise a later
+      // delivery/read receipt for one of these (loaded when the chat was
+      // opened, not via the live incoming-message pipeline) can never find
+      // its record and buffers forever. See IncomingMessageHandler.
+      Message.registerKnown(messages);
       return (
-        messages: messagesData.map((e) => Message.fromMap(e)).toList(),
+        messages: messages,
         chats: <Chat>[],
       );
     }

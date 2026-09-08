@@ -479,6 +479,75 @@ persisted correctly: pin still at top, mute icon still showing on the tile, and 
 archived chat still absent from the main list but present under Archived. Reversed
 all three afterward and confirmed the `localStorage` entry cleared back to `{}`.
 
+### Replies/delivered/read receipts not updating live in an open conversation — fixed and verified live
+Reported by the user: sending worked fine, but while actively viewing a conversation,
+incoming replies, "Delivered", and "Read" status only appeared after navigating away
+from the chat and back in. This is the same root-cause family as item 5 above (an
+unguarded `Database`/ObjectBox call throwing on web, silently swallowed), just hitting
+a different call path.
+
+Root cause: `Chat.findOne` and `Message.findOne` (`lib/database/html/{chat,message}.dart`)
+were both hardcoded to always return `null` — apparently on the assumption that shared
+code would use the (already-existing) async `findOneWeb`/`findOneAsync` variants instead,
+but `IncomingMessageHandler` (`lib/services/backend/incoming_message_handler.dart`,
+shared with native/desktop, no web awareness) calls the plain sync `findOne` throughout:
+- `_processUpdatedMessage()` used `Message.findOne(guid: ...)` to look up the message a
+  delivery/read receipt applies to. Since this always returned `null` on web, every single
+  `updated-message` event looked like it had no matching record, so it was parked via
+  `_parkPendingUpdate()` and never applied — `_dispatchUpdatedMessage()` (the call that
+  actually flips `dateDelivered`/`dateRead` on the `MessageState`) was never reached. A
+  10s expiry timer just re-tried and re-parked it, forever, once per open chat message.
+- `_hydrateChat()` used `Chat.findOne(guid: ...)` to short-circuit when the chat was
+  already loaded. Since it always returned `null`, this early-return path was dead code
+  on web, and *every* incoming message/update fell through to
+  `ChatInterface.bulkSyncChats()`, which unconditionally calls
+  `Database.chats.getMany(chatIds)` (`lib/services/backend/interfaces/chat_interface.dart`)
+  — `Database.chats` is an uninitialized `late final` box on web, so this threw
+  `LateInitializationError` on *every* incoming new message, before `chat.addMessage()`
+  (the call that actually saves the message and fires the reactive update) ever ran. The
+  exception was swallowed by `IncomingMessageHandler`'s generic `catchError` with no
+  rethrow and no UI signal.
+- A secondary instance of the same gap: messages loaded via history sync when a chat is
+  opened (`SyncInterface.bulkSyncData`'s web branch) were built with `Message.fromMap()`
+  directly, bypassing `Message.save()` — so they were never registered anywhere
+  `Message.findOne` could find them either. A late-arriving receipt for one of those
+  (e.g. from before this browser session started) would hit the exact same "no DB
+  record yet" parking bug, forever, once per message. Confirmed live via the console
+  spamming an identical "buffering"/"expired after 10s" cycle every 10 seconds for one
+  fixed message GUID with no end in sight, for a message that predated the session.
+
+Fix (four files):
+- `lib/database/html/chat.dart` — `Chat.findOne` now delegates to `ChatsSvc.findChatByGuid`/
+  `findChatByChatIdentifier` (the same in-memory lookup `findOneWeb` already used, just
+  made synchronous) instead of unconditionally returning `null`.
+- `lib/database/html/message.dart` — added a private static `_registry` (`Map<String,
+  Message>`) populated by every `save`/`bulkSave`/`bulkSaveNewMessages`/`replaceMessage`
+  call (mirroring the exact points where `WebListeners.notifyMessage()` already fires),
+  with entries removed on `delete()` and on GUID swap in `replaceMessage()`. `findOne`
+  now reads from this registry instead of returning `null`. Added
+  `Message.registerKnown(Iterable<Message>)` to backfill the registry for messages
+  loaded via a path that doesn't call `save()`.
+- `lib/database/io/message.dart` — added a no-op `Message.registerKnown()` mirror (native
+  has a real ObjectBox-backed `findOne`, no registry needed) purely so the shared caller
+  below compiles on every platform, matching the existing `findOneWeb`-on-io pattern.
+- `lib/services/backend/interfaces/chat_interface.dart` — `bulkSyncChats()` now has a
+  `kIsWeb` branch that hydrates chats directly from the map data already passed in
+  (`Chat.fromMap`) instead of touching `Database.chats`, for the remaining case
+  `_hydrateChat` still falls through to bulk-sync (a brand-new chat, or a group-event
+  message) — best-effort (no handle-matching/persistence), just enough to not crash.
+- `lib/services/backend/interfaces/sync_interface.dart` — `bulkSyncData()`'s existing
+  `kIsWeb` branch now calls `Message.registerKnown()` on the messages it builds, fixing
+  the secondary gap above.
+
+**Verified live** against `http://10.7.12.13:8090/web` (self-chat with own number,
+`+19193574218`): sent a message, watched it stay unread with no status, then — without
+navigating away from the conversation — watched the echoed reply arrive as an incoming
+bubble and the sent bubble's status change to "Read", all in place. Console logs during
+this showed the `new-message`/`updated-message`/`chat-read-status-changed` socket events
+being processed cleanly with no `LateInitializationError` and no "no DB record yet —
+buffering" loop (confirmed by contrast against a run on the pre-fix build, which showed
+exactly that loop, once per 10s, forever, for the same kind of event).
+
 ## Suggested order to keep working
 
 1. ~~Verify the chat-list sort fix live, commit, push.~~ Done.

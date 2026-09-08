@@ -669,7 +669,24 @@ class Chat {
     return null;
   }
 
+  /// Synchronous counterpart to [findOneWeb], for shared (platform-agnostic)
+  /// call sites — e.g. `IncomingMessageHandler._hydrateChat` — that call the
+  /// plain `findOne` without knowing they're on web. Looks up the in-memory
+  /// `Chat` already loaded into `ChatsSvc`'s `ChatState` map rather than
+  /// hitting the network, so it can be called synchronously like the io/
+  /// ObjectBox-backed version. Returning `null` unconditionally here (the old
+  /// behavior) forced every incoming message/update through the network
+  /// sync fallback in `_hydrateChat`, which crashes on web (no local DB) and
+  /// silently aborted the whole incoming pipeline before it could update the
+  /// UI — see `.claude/WEB_CLIENT_DEBUGGING.md`.
   static Chat? findOne({String? guid, String? chatIdentifier}) {
+    if (guid != null) {
+      // ignore: argument_type_not_assignable, return_of_invalid_type, invalid_assignment, for_in_of_invalid_element_type
+      return ChatsSvc.findChatByGuid(guid);
+    } else if (chatIdentifier != null) {
+      // ignore: argument_type_not_assignable, return_of_invalid_type, invalid_assignment, for_in_of_invalid_element_type
+      return ChatsSvc.findChatByChatIdentifier(chatIdentifier);
+    }
     return null;
   }
 

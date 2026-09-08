@@ -220,6 +220,18 @@ class ChatInterface {
 
   static Future<({List<Chat> chats, List<int> affectedHandleIds})> bulkSyncChats(
       {required List<Map<String, dynamic>> chatsData}) async {
+    // No local ObjectBox DB on web to upsert into or hydrate back from — the
+    // isolate/action layer below unconditionally touches `Database.chats`/
+    // `Database.handles`, which are never initialized on web and throw.
+    // Best-effort fallback: hydrate the chats directly from the same map data
+    // the caller already has, skipping handle-matching/persistence, so
+    // `IncomingMessageHandler._hydrateChat` doesn't abort the whole incoming
+    // pipeline for a brand-new chat or group event. See
+    // `.claude/WEB_CLIENT_DEBUGGING.md`.
+    if (kIsWeb) {
+      return (chats: chatsData.map((e) => Chat.fromMap(e)).toList(), affectedHandleIds: <int>[]);
+    }
+
     final data = {
       'chatsData': chatsData,
     };
