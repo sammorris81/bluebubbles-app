@@ -8,7 +8,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:network_tools/network_tools.dart'
-    if (dart.library.html) 'package:bluebubbles/models/html/network_tools.dart';
+    if (dart.library.html) 'package:bluebubbles/database/html/network_tools.dart';
 
 class NetworkTasks {
   static Future<void>? _configureNetworkToolsFuture;

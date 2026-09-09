@@ -447,6 +447,11 @@ class Message {
     return null;
   }
 
+  /// No-op on native/desktop — [findOne] here is a real ObjectBox query, so
+  /// there's no in-memory registry to populate. Only meaningful on Flutter
+  /// Web; see the override in `database/html/message.dart`.
+  static void registerKnown(Iterable<Message> messages) {}
+
   static Future<Message?> findOneAsync({String? guid, String? associatedMessageGuid}) async {
     if (kIsWeb) return null;
 

@@ -4,10 +4,16 @@ import 'package:bluebubbles/env.dart';
 import 'package:bluebubbles/services/backend/actions/custom_group_actions.dart';
 import 'package:bluebubbles/services/isolates/global_isolate.dart';
 import 'package:bluebubbles/services/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 
 class CustomGroupInterface {
   static Future<List<CustomGroup>> getAll() async {
+    // Custom groups live only in ObjectBox, which web has no equivalent for --
+    // Database.store is never initialized there, so reading it throws a
+    // LateInitializationError. Mirrors the guard in CustomGroupsService.refresh().
+    if (kIsWeb) return [];
+
     final ids = isIsolate
         ? await CustomGroupActions.getAllIds({})
         : await GetIt.I<GlobalIsolate>().send<List<int>>(IsolateRequestType.getAllCustomGroups, input: {});

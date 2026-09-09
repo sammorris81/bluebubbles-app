@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'package:universal_io/io.dart';
 
 import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'package:bluebubbles/env.dart';

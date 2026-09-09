@@ -3,6 +3,7 @@ import 'package:bluebubbles/database/models.dart';
 import 'package:bluebubbles/env.dart';
 import 'package:bluebubbles/services/backend/actions/sync_actions.dart';
 import 'package:bluebubbles/services/isolates/incremental_sync_isolate.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:get_it/get_it.dart';
 import 'package:bluebubbles/services/isolates/global_isolate.dart';
 
@@ -17,6 +18,24 @@ class SyncInterface {
       'chatData': chatData,
       'messagesData': messagesData,
     };
+
+    if (kIsWeb) {
+      // No local DB to hydrate IDs from on web — SyncActions.bulkSyncData
+      // shortcuts to empty ID lists there, so parse straight from the raw
+      // maps the caller already has instead of hitting the uninitialized
+      // Database.messages/chats boxes (LateInitializationError). The only
+      // web caller (MessagesService.loadChunk) only reads `.messages`.
+      final messages = messagesData.map((e) => Message.fromMap(e)).toList();
+      // Register with Message.findOne's in-memory index — otherwise a later
+      // delivery/read receipt for one of these (loaded when the chat was
+      // opened, not via the live incoming-message pipeline) can never find
+      // its record and buffers forever. See IncomingMessageHandler.
+      Message.registerKnown(messages);
+      return (
+        messages: messages,
+        chats: <Chat>[],
+      );
+    }
 
     late Map<String, dynamic> result;
     if (isIsolate) {

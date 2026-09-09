@@ -300,17 +300,46 @@ class ContactServiceV2 {
   void notifyHandlesUpdated(List<int> handleIds) {
     if (handleIds.isEmpty) return;
 
-    // Push refreshed Handle data into the HandleState registry
-    if (!kIsWeb) {
-      final refreshed = handleIds.map((id) => Database.handles.get(id)).whereType<Handle>().toList();
-      if (refreshed.isNotEmpty) HandleSvc.updateHandleStates(refreshed);
+    if (kIsWeb) {
+      _notifyHandlesUpdatedWeb(handleIds);
+      return;
     }
+
+    // Push refreshed Handle data into the HandleState registry
+    final refreshed = handleIds.map((id) => Database.handles.get(id)).whereType<Handle>().toList();
+    if (refreshed.isNotEmpty) HandleSvc.updateHandleStates(refreshed);
 
     // Update chats that have these handles as participants
     // This ensures chat titles and headers reflect the new contact names
-    if (!kIsWeb) {
-      _updateChatsForHandles(handleIds);
+    _updateChatsForHandles(handleIds);
+  }
+
+  /// Web equivalent of the two `notifyHandlesUpdated` steps above.
+  ///
+  /// There's no `Database.handles` box to re-read from on web, so the refreshed
+  /// handles are the in-memory ones the contact sync just attached contacts to
+  /// (see `ContactV2Actions._matchContactsToWebHandles`). Pushing them through
+  /// [HandleService.updateHandleStates] updates each `HandleState.displayName`,
+  /// and `ChatState` already listens on that (`ever(hs.displayName, ...)`) to
+  /// recompute its title and creator subtitle — so chat tiles refresh reactively
+  /// without the DB-backed `_updateChatsForHandles` pass.
+  void _notifyHandlesUpdatedWeb(List<int> handleIds) {
+    if (!GetIt.I.isRegistered<ChatsService>()) return;
+
+    final idSet = handleIds.toSet();
+    final refreshed = <int, Handle>{};
+    for (final handle in ChatsSvc.webCachedHandles) {
+      if (handle.id != null && idSet.contains(handle.id)) refreshed[handle.id!] = handle;
     }
+    for (final chat in ChatsSvc.allChats) {
+      for (final handle in chat.handles) {
+        if (handle.id != null && idSet.contains(handle.id)) refreshed.putIfAbsent(handle.id!, () => handle);
+      }
+    }
+
+    if (refreshed.isEmpty) return;
+    HandleSvc.updateHandleStates(refreshed.values.toList());
+    Logger.info('[ContactServiceV2] Refreshed ${refreshed.length} web handle states after contact sync');
   }
 
   /// Update chats that contain the affected handles

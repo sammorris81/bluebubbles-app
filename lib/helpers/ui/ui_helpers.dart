@@ -239,67 +239,65 @@ Future<void> showConversationTileMenu(
       tapPosition.dy,
     ),
     items: <PopupMenuEntry>[
-      if (!kIsWeb)
-        PopupMenuItem(
-          padding: EdgeInsets.zero,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () {
-              final chatState = ChatsSvc.getChatState(chat.guid);
-              ChatsSvc.setChatPinned(chatState?.chat ?? chat, !chat.isPinned!);
-              Navigator.pop(context);
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 15.0, vertical: 12.0),
-              child: Row(
-                children: <Widget>[
-                  Padding(
-                    padding: const EdgeInsets.only(right: 10),
-                    child: Icon(
-                      chat.isPinned!
-                          ? (ios ? CupertinoIcons.pin_slash : Icons.star_outline)
-                          : (ios ? CupertinoIcons.pin : Icons.star),
-                      color: context.theme.colorScheme.onSurfaceVariant,
-                    ),
+      PopupMenuItem(
+        padding: EdgeInsets.zero,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            final chatState = ChatsSvc.getChatState(chat.guid);
+            ChatsSvc.setChatPinned(chatState?.chat ?? chat, !chat.isPinned!);
+            Navigator.pop(context);
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 15.0, vertical: 12.0),
+            child: Row(
+              children: <Widget>[
+                Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: Icon(
+                    chat.isPinned!
+                        ? (ios ? CupertinoIcons.pin_slash : Icons.star_outline)
+                        : (ios ? CupertinoIcons.pin : Icons.star),
+                    color: context.theme.colorScheme.onSurfaceVariant,
                   ),
-                  Text(
-                    chat.isPinned! ? "Unpin" : "Pin",
-                    style: textTheme.bodyLarge!.copyWith(color: context.theme.colorScheme.onSurfaceVariant),
-                  ),
-                ],
-              ),
+                ),
+                Text(
+                  chat.isPinned! ? "Unpin" : "Pin",
+                  style: textTheme.bodyLarge!.copyWith(color: context.theme.colorScheme.onSurfaceVariant),
+                ),
+              ],
             ),
           ),
         ),
-      if (!kIsWeb)
-        PopupMenuItem(
-          padding: EdgeInsets.zero,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () {
-              chat.toggleMuteAsync(chat.muteType != "mute");
-              Navigator.pop(context);
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 15.0, vertical: 12.0),
-              child: Row(
-                children: <Widget>[
-                  Padding(
-                    padding: const EdgeInsets.only(right: 10),
-                    child: Icon(
-                      chat.muteType == "mute"
-                          ? (ios ? CupertinoIcons.bell : Icons.notifications_active)
-                          : (ios ? CupertinoIcons.bell_slash : Icons.notifications_off),
-                      color: context.theme.colorScheme.onSurfaceVariant,
-                    ),
+      ),
+      PopupMenuItem(
+        padding: EdgeInsets.zero,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            chat.toggleMuteAsync(chat.muteType != "mute");
+            Navigator.pop(context);
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 15.0, vertical: 12.0),
+            child: Row(
+              children: <Widget>[
+                Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: Icon(
+                    chat.muteType == "mute"
+                        ? (ios ? CupertinoIcons.bell : Icons.notifications_active)
+                        : (ios ? CupertinoIcons.bell_slash : Icons.notifications_off),
+                    color: context.theme.colorScheme.onSurfaceVariant,
                   ),
-                  Text(chat.muteType == "mute" ? 'Show Alerts' : 'Hide Alerts',
-                      style: textTheme.bodyLarge!.copyWith(color: context.theme.colorScheme.onSurfaceVariant)),
-                ],
-              ),
+                ),
+                Text(chat.muteType == "mute" ? 'Show Alerts' : 'Hide Alerts',
+                    style: textTheme.bodyLarge!.copyWith(color: context.theme.colorScheme.onSurfaceVariant)),
+              ],
             ),
           ),
         ),
+      ),
       PopupMenuItem(
         padding: EdgeInsets.zero,
         child: GestureDetector(
@@ -333,37 +331,36 @@ Future<void> showConversationTileMenu(
           ),
         ),
       ),
-      if (!kIsWeb)
-        PopupMenuItem(
-          padding: EdgeInsets.zero,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () {
-              ChatsSvc.setChatArchived(chat, !chat.isArchived!);
-              Navigator.pop(context);
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 15.0, vertical: 12.0),
-              child: Row(
-                children: <Widget>[
-                  Padding(
-                    padding: const EdgeInsets.only(right: 10),
-                    child: Icon(
-                      chat.isArchived!
-                          ? (ios ? CupertinoIcons.tray_arrow_up : Icons.unarchive)
-                          : (ios ? CupertinoIcons.tray_arrow_down : Icons.archive),
-                      color: context.theme.colorScheme.onSurfaceVariant,
-                    ),
+      PopupMenuItem(
+        padding: EdgeInsets.zero,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            ChatsSvc.setChatArchived(chat, !chat.isArchived!);
+            Navigator.pop(context);
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 15.0, vertical: 12.0),
+            child: Row(
+              children: <Widget>[
+                Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: Icon(
+                    chat.isArchived!
+                        ? (ios ? CupertinoIcons.tray_arrow_up : Icons.unarchive)
+                        : (ios ? CupertinoIcons.tray_arrow_down : Icons.archive),
+                    color: context.theme.colorScheme.onSurfaceVariant,
                   ),
-                  Text(
-                    chat.isArchived! ? 'Unarchive' : 'Archive',
-                    style: textTheme.bodyLarge!.copyWith(color: context.theme.colorScheme.onSurfaceVariant),
-                  ),
-                ],
-              ),
+                ),
+                Text(
+                  chat.isArchived! ? 'Unarchive' : 'Archive',
+                  style: textTheme.bodyLarge!.copyWith(color: context.theme.colorScheme.onSurfaceVariant),
+                ),
+              ],
             ),
           ),
         ),
+      ),
       if (!kIsWeb)
         PopupMenuItem(
           padding: EdgeInsets.zero,

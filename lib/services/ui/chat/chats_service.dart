@@ -37,6 +37,12 @@ class ChatsService {
   Completer<void> loadedAllChats = Completer();
   final RxBool loadedFirstChatBatch = false.obs;
 
+  /// Guards against concurrent [init] calls racing on shared mutable state
+  /// (chatStates, _sortedChats, loadedAllChats) — e.g. the startup path and
+  /// NetworkTasks.onConnect() can both call this in quick succession right
+  /// after setup completes.
+  Future<void>? _initInFlight;
+
   /// Global unread count across all chats
   final RxInt unreadCount = 0.obs;
 
@@ -291,9 +297,16 @@ class ChatsService {
     }
   }
 
-  Future<void> init({bool force = false, bool headless = false}) async {
+  Future<void> init({bool force = false, bool headless = false}) {
     this.headless = headless;
-    if ((!force && !SettingsSvc.settings.finishedSetup.value) || headless) return;
+    if ((!force && !SettingsSvc.settings.finishedSetup.value) || headless) return Future.value();
+    if (_initInFlight != null) return _initInFlight!;
+    final future = _initInternal();
+    _initInFlight = future;
+    return future.whenComplete(() => _initInFlight = null);
+  }
+
+  Future<void> _initInternal() async {
     Logger.info("Fetching chats...", tag: "ChatBloc");
 
     reset();
@@ -364,6 +377,15 @@ class ChatsService {
     // The listener only fires on changes, so we need an explicit call here to
     // seed the badge with the correct value before any message is received.
     _recalculateUnreadCount();
+
+    // On web, contact matching runs against the handles held in memory here
+    // (there's no local DB to match against), but ContactServiceV2.init() fires
+    // its first sync from StartupTasks *before* this method has loaded any —
+    // so that sync always matched zero handles. Re-run it now that they exist.
+    // reset() clears webCachedHandles, so this also covers the re-init path.
+    if (kIsWeb && GetIt.I.isRegistered<ContactServiceV2>()) {
+      unawaited(ContactsSvcV2.syncContactsToHandles(wait: false));
+    }
 
     if (kIsDesktop) {
       unawaited(
@@ -1024,6 +1046,7 @@ class ChatsService {
 
   /// Get chat count
   int? getChatCount() {
+    if (kIsWeb) return null;
     return Database.chats.count();
   }
 

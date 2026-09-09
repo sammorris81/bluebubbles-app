@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:bluebubbles/database/models.dart';
 import 'package:bluebubbles/services/backend/interfaces/custom_group_interface.dart';
 import 'package:bluebubbles/services/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
 import 'package:get_it/get_it.dart';
 
@@ -17,6 +18,9 @@ class CustomGroupsService {
   StreamSubscription? _eventSub;
 
   Future<void> init() async {
+    // Custom Groups persists to the local ObjectBox DB, which doesn't exist
+    // on web — leave `groups` empty rather than crashing startup.
+    if (kIsWeb) return;
     await refresh();
     _eventSub = EventDispatcherSvc.stream.listen((event) {
       if (event.type == 'custom-groups-updated') refresh();
@@ -24,6 +28,7 @@ class CustomGroupsService {
   }
 
   Future<void> refresh() async {
+    if (kIsWeb) return;
     groups.value = await CustomGroupInterface.getAll();
     // Drop any filter selection pointing at a group that no longer exists
     // (e.g. just got deleted). ChatsSvc is guaranteed to be registered by the

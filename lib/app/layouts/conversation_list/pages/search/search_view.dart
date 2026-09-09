@@ -8,6 +8,7 @@ import 'package:bluebubbles/app/layouts/conversation_view/pages/conversation_vie
 import 'package:bluebubbles/app/layouts/settings/widgets/settings_widgets.dart';
 import 'package:bluebubbles/database/models.dart';
 import 'package:bluebubbles/services/services.dart';
+import 'package:bluebubbles/utils/logger/logger.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -103,28 +104,32 @@ class SearchViewState extends State<SearchView> with ThemeHelpers {
       results: [],
     );
 
-    if (local.value) {
-      search.results.addAll(
-        await SearchQueryHelper.runLocal(
-          term: currentSearchTerm.value!,
-          selectedChat: selectedChat.value,
-          selectedHandle: selectedHandle.value,
-          isFromMe: isFromMe.value,
-          isNotFromMe: isNotFromMe.value,
-          sinceDate: sinceDate.value,
-        ),
-      );
-    } else {
-      search.results.addAll(
-        await SearchQueryHelper.runNetwork(
-          term: currentSearchTerm.value!,
-          selectedChat: selectedChat.value,
-          selectedHandle: selectedHandle.value,
-          isFromMe: isFromMe.value,
-          isNotFromMe: isNotFromMe.value,
-          sinceDate: sinceDate.value,
-        ),
-      );
+    try {
+      if (local.value) {
+        search.results.addAll(
+          await SearchQueryHelper.runLocal(
+            term: currentSearchTerm.value!,
+            selectedChat: selectedChat.value,
+            selectedHandle: selectedHandle.value,
+            isFromMe: isFromMe.value,
+            isNotFromMe: isNotFromMe.value,
+            sinceDate: sinceDate.value,
+          ),
+        );
+      } else {
+        search.results.addAll(
+          await SearchQueryHelper.runNetwork(
+            term: currentSearchTerm.value!,
+            selectedChat: selectedChat.value,
+            selectedHandle: selectedHandle.value,
+            isFromMe: isFromMe.value,
+            isNotFromMe: isNotFromMe.value,
+            sinceDate: sinceDate.value,
+          ),
+        );
+      }
+    } catch (e, s) {
+      Logger.error('Search failed', error: e, trace: s, tag: 'SearchView');
     }
 
     pastSearches.add(search);

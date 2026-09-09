@@ -62,9 +62,17 @@ class PlayerState {
   });
 }
 
+/// Stand-in for media_kit's native (mpv-backed) platform player. Web has no
+/// such backend, so [Player.platform] always throws before this type would
+/// ever be checked against at runtime.
+class NativePlayer {
+  Future<void> setProperty(String key, String value) async {}
+}
+
 class Player {
   PlayerState get state => throw Exception();
   PlayerStreams get stream => throw Exception();
+  Object get platform => throw Exception();
 
   FutureOr<void> dispose({int code = 0}) {}
 
@@ -78,6 +86,9 @@ class Player {
 
   /// Pauses the [Player].
   FutureOr<void> pause() {}
+
+  /// Stops the [Player] (pauses and seeks to the start).
+  FutureOr<void> stop() {}
 
   /// Cycles between [play] & [pause] states of the [Player].
   FutureOr<void> playOrPause() {}
@@ -129,6 +140,14 @@ class VideoController {
 
   final ValueNotifier<Rect?> rect = ValueNotifier<Rect?>(null);
 
+  double get aspectRatio {
+    final r = rect.value;
+    if (r == null || r.height == 0) return 1.0;
+    return r.width / r.height;
+  }
+
+  Future<void> get waitUntilFirstFrameRendered => Future.value();
+
   VideoController(
     this.player,
   );
@@ -151,10 +170,21 @@ class Video extends StatefulWidget {
   /// The [VideoController] reference to control this [Video] output & connect with [Player] from `package:media_kit`.
   final VideoController? controller;
 
+  /// Builder for playback controls overlay (e.g. `media_kit_video_controls`).
+  /// Typed loosely since this stub never actually builds.
+  final Widget Function(dynamic)? controls;
+
+  final BoxFit fit;
+
+  final FilterQuality filterQuality;
+
   /// {@macro video}
   const Video({
     super.key,
     required this.controller,
+    this.controls,
+    this.fit = BoxFit.contain,
+    this.filterQuality = FilterQuality.low,
   });
 
   @override

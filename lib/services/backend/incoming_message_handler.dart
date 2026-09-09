@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
-import 'dart:io';
+import 'package:universal_io/io.dart';
 
 import 'package:audio_waveforms/audio_waveforms.dart';
 import 'package:bluebubbles/database/models.dart';

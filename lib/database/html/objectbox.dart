@@ -1,4 +1,5 @@
 // ignore_for_file: camel_case_types
+import 'package:bluebubbles/database/html/attachment.dart';
 import 'package:bluebubbles/database/html/handle.dart';
 
 /// READ: Dummy file to allow objectbox related code to compile on Web. We use
@@ -67,6 +68,10 @@ class Box<T> {
   /// Pass growableResult: true for the resulting list to be growable.
   List<T?> getMany(List<int> ids, {bool growableResult = false}) => throw Exception('Unsupported Platform');
 
+  /// Removes (deletes) the Object with the given [id]. Returns whether that
+  /// ID existed (and thus was removed).
+  bool remove(int id) => throw Exception('Unsupported Platform');
+
   /// Removes (deletes) by ID, returning a list of IDs of all removed Objects.
   int removeMany(List<int> ids) => throw Exception('Unsupported Platform');
 
@@ -75,21 +80,53 @@ class Box<T> {
 
   bool isEmpty() => throw Exception('Unsupported Platform');
 
+  int count() => throw Exception('Unsupported Platform');
+
   dynamic query([dynamic qc]) => throw Exception('Unsupported Platform');
 }
 
+/// Minimal in-memory stand-in for ObjectBox's `ToOne<T>` relation. There's no
+/// real DB on web, so this just holds whatever was last assigned — it used to
+/// be a pure no-op (`target` always `null`, `target =` discarded), which
+/// silently broke every relation that goes through it (e.g.
+/// `Attachment.message`, `Message.chat`, `Message.handleRelation`).
 class ToOne<EntityT> {
-  /// Get target object. If it's the first access, this reads from DB.
-  EntityT? get target => null;
+  EntityT? _target;
 
-  /// Set relation target object. Note: this does not store the change yet, use
-  /// [Box.put()] on the containing (relation source) object.
-  set target(EntityT? object) {}
+  EntityT? get target => _target;
+
+  set target(EntityT? object) => _target = object;
 
   int get targetId => 0;
+
+  bool get hasValue => target != null;
+}
+
+/// Minimal in-memory stand-in for ObjectBox's `ToMany<T>` relation list.
+/// Unlike the other stubs in this file (which throw, since there's no real
+/// DB on web), this actually holds items in memory so shared, non-web-aware
+/// UI code that reads a `ToMany` field (e.g. `CustomGroup.chats`) still works.
+class ToMany<EntityT> extends Iterable<EntityT> {
+  final List<EntityT> _items = [];
+
+  @override
+  Iterator<EntityT> get iterator => _items.iterator;
+
+  void add(EntityT item) => _items.add(item);
+
+  void addAll(Iterable<EntityT> items) => _items.addAll(items);
+
+  bool remove(EntityT item) => _items.remove(item);
+
+  void clear() => _items.clear();
+
+  /// No-op on web: there's no DB to persist the relation to.
+  void applyToDb() {}
 }
 
 class Store {
+  static bool isOpen(String directoryPath) => throw Exception('Unsupported Platform');
+
   Box<T> box<T>() => throw Exception('Unsupported Platform');
 
   R runInTransaction<R>(TxMode mode, R Function() fn) => throw Exception('Unsupported Platform');
@@ -138,34 +175,82 @@ class Query<T> {
   }
 }
 
+/// Stand-in for ObjectBox's `Condition<T>`/`QueryProperty<T>` family. There's
+/// no real query engine on web, so every operator just returns `this` for
+/// further chaining — actually running a query still throws (`Box.query()`),
+/// this only exists so query-building code type-checks.
 class Temp {
-  dynamic add(dynamic thing) {
-    return this;
-  }
+  dynamic add(dynamic thing) => this;
 
-  dynamic equals(dynamic thing) {
-    return this;
-  }
+  dynamic equals(dynamic thing, {bool caseSensitive = true}) => this;
 
-  dynamic oneOf(dynamic thing) {
-    return this;
-  }
+  dynamic notEquals(dynamic thing, {bool caseSensitive = true}) => this;
 
-  dynamic contains(dynamic thing) {
-    return this;
-  }
+  dynamic oneOf(dynamic thing, {bool caseSensitive = true}) => this;
 
-  dynamic isNull() {
-    return this;
-  }
+  dynamic notOneOf(dynamic thing, {bool caseSensitive = true}) => this;
 
-  dynamic notNull() {
-    return this;
-  }
+  dynamic contains(dynamic thing, {bool caseSensitive = true}) => this;
+
+  dynamic startsWith(dynamic thing, {bool caseSensitive = true}) => this;
+
+  dynamic endsWith(dynamic thing, {bool caseSensitive = true}) => this;
+
+  dynamic greaterThan(dynamic thing) => this;
+
+  dynamic lessThan(dynamic thing) => this;
+
+  dynamic greaterOrEqual(dynamic thing) => this;
+
+  dynamic lessOrEqual(dynamic thing) => this;
+
+  dynamic between(dynamic a, dynamic b) => this;
+
+  dynamic isNull() => this;
+
+  dynamic notNull() => this;
+
+  dynamic and(dynamic other) => this;
+
+  dynamic or(dynamic other) => this;
+
+  dynamic operator &(dynamic other) => this;
+
+  dynamic operator |(dynamic other) => this;
 }
 
+/// These are real ObjectBox types on native; on web every query property,
+/// condition, and query builder just degrades to [Temp] (or dynamic).
+typedef Condition<T> = Temp;
+typedef QueryIntegerProperty<T> = Temp;
+typedef QueryStringProperty<T> = Temp;
+typedef QueryBooleanProperty<T> = Temp;
+typedef QueryBuilder<T> = dynamic;
+
 class Attachment_ {
+  static final id = Temp();
+
+  static final originalROWID = Temp();
+
   static final guid = Temp();
+
+  static final uti = Temp();
+
+  static final mimeType = Temp();
+
+  static final isOutgoing = Temp();
+
+  static final transferName = Temp();
+
+  static final totalBytes = Temp();
+
+  static final height = Temp();
+
+  static final width = Temp();
+
+  static final hasLivePhoto = Temp();
+
+  static final message = Temp();
 }
 
 /// [Chat] entity fields to define ObjectBox queries.
@@ -179,9 +264,17 @@ class Chat_ {
   static final hasUnreadMessage = Temp();
 
   static final muteType = Temp();
+
+  static final dbOnlyLatestMessageDate = Temp();
 }
 
 class Contact_ {
+  static final displayName = Temp();
+}
+
+class ContactV2_ {
+  static final nativeContactId = Temp();
+
   static final displayName = Temp();
 }
 
@@ -189,6 +282,14 @@ class Handle_ {
   static final address = Temp();
 
   static final uniqueAddressAndService = Temp();
+
+  static final originalROWID = Temp();
+
+  static final service = Temp();
+}
+
+class ThemeStruct_ {
+  static final name = Temp();
 }
 
 class Message_ {
@@ -279,6 +380,9 @@ class Message_ {
   /// see [Message.chat]
   static final chat = Temp();
 
+  /// see [Message.handleRelation]
+  static final handleRelation = Temp();
+
   /// see [Message.dbAttributedBody]
   static final dbAttributedBody = Temp();
 
@@ -318,3 +422,12 @@ dynamic getObjectBoxModel() => throw Exception('Unsupported Platform');
 extension ObjectboxShims on List<Handle> {
   void applyToDb() {}
 }
+
+extension ObjectboxAttachmentShims on List<Attachment> {
+  void applyToDb() {}
+}
+
+/// Real ObjectBox throws this from `Box.put()` on a `@Unique()` conflict.
+/// Never actually thrown on web (there's no DB to violate a constraint on),
+/// but several shared action files catch it by type.
+class UniqueViolationException implements Exception {}

@@ -355,6 +355,17 @@ class GlobalIsolate {
 
   /// Sends a request to the isolate and waits for a response
   Future<T> send<T>(IsolateRequestType type, {dynamic input, Duration? customTimeout}) async {
+    // dart:isolate doesn't exist on web — there's nowhere to spawn a
+    // background isolate to. Run the action directly on the main thread
+    // instead (same as the `isIsolate == true` path); actions that touch the
+    // local ObjectBox DB will still throw (there's no DB on web either), but
+    // that's an isolated failure instead of crashing app startup outright.
+    if (kIsWeb) {
+      final action = IsolateActons.actions[type];
+      if (action == null) throw Exception('No action registered for $type');
+      return await action(input) as T;
+    }
+
     // A new request means the app is active again. Cancel any in-progress drain
     // rather than rejecting — dropping a message (outgoing send or incoming DB
     // write) is far worse than delaying a graceful idle shutdown.
@@ -395,6 +406,10 @@ class GlobalIsolate {
 
   /// Fire-and-forget send (no response expected)
   void broadcast(IsolateRequestType type, dynamic input) {
+    if (kIsWeb) {
+      IsolateActons.actions[type]?.call(input);
+      return;
+    }
     _ensureStarted().then((_) {
       _scheduleIdleShutdown();
 

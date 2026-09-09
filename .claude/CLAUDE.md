@@ -1,5 +1,11 @@
 # Claude Workflow — BlueBubbles
 
+## Getting Started
+Run the `quickstart` skill (`.claude/skills/quickstart/SKILL.md`) at the start of a
+new task — it covers PATH setup for `dart`/`flutter`, how to run and live-verify a
+change (including the web-server hot-restart workflow and Claude-in-Chrome tool
+setup), and the git/fork workflow, without re-deriving them each session.
+
 ## Rules
 Detailed coding standards live in `.claude/rules/`:
 - `frontend.md` — widget patterns, state, theming, naming
@@ -7,6 +13,12 @@ Detailed coding standards live in `.claude/rules/`:
 - `database.md` — ObjectBox entities, queries, transactions, serialization
 - `services.md` — service access, event dispatch, method channels, navigation
 - `git.md` — commit message format
+
+## In-Progress Work
+- `.claude/WEB_CLIENT_DEBUGGING.md` — status of an active effort to get the deprecated
+  web client (`flutter run -d web-server`) working for live bug debugging: what's
+  fixed, what's root-caused but not fixed, and the git remote setup (fork-only, no
+  upstream PRs). Check this before starting web-related work.
 
 ## Architecture & Design Decisions
 - `docs/ARCHITECTURE.md` — how the system's major subsystems work and interact

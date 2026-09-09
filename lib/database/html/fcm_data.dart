@@ -33,22 +33,23 @@ class FCMData {
     );
   }
 
-  FCMData save() {
+  Future<FCMData> save({bool wait = false}) async {
     if (isNull) return this;
-    Future.delayed(Duration.zero, () async {
-      await PrefsSvc.firebase.saveConfig(
-        projectID: projectID,
-        storageBucket: storageBucket,
-        apiKey: apiKey,
-        firebaseURL: firebaseURL,
-        clientID: clientID,
-        applicationID: applicationID,
-      );
-    });
+    final future = PrefsSvc.firebase.saveConfig(
+      projectID: projectID,
+      storageBucket: storageBucket,
+      apiKey: apiKey,
+      firebaseURL: firebaseURL,
+      clientID: clientID,
+      applicationID: applicationID,
+    );
+    if (wait) {
+      await future;
+    }
     return this;
   }
 
-  static void deleteFcmData() async {
+  static Future<void> deleteFcmData() async {
     await PrefsSvc.firebase.clearConfig();
   }
 

@@ -138,7 +138,7 @@ class BaseLogger {
     }
 
     _logger = createLogger();
-    _isolateName = isolateNameOverride ?? Isolate.current.debugName ?? "main";
+    _isolateName = isolateNameOverride ?? (kIsWeb ? "main" : Isolate.current.debugName) ?? "main";
 
     if (SettingsSvc.initCompleted.isCompleted) {
       currentLevel = SettingsSvc.settings.logLevel.value;

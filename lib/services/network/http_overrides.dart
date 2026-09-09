@@ -1,6 +1,8 @@
+import 'dart:io' show HttpClient;
+
 import 'package:bluebubbles/helpers/helpers.dart';
 import 'package:bluebubbles/services/network/user_certificates.dart';
-import 'package:universal_io/io.dart';
+import 'package:universal_io/io.dart' hide HttpClient;
 
 /// Shared certificate validation logic for both HTTP and WebSocket connections
 /// Returns true if the certificate should be accepted (override bad cert), false otherwise

@@ -382,27 +382,28 @@ List<Widget> buildSettingItemList({
         ),
 
         // Custom Groups Tile
-        SearchableSettingItem(
-          title: "Custom Groups",
-          searchTags: ["Custom Groups", "Create Group", "Group Chats", "Chat Groups"],
-          onTap: () {
-            ns.pushAndRemoveSettingsUntil(context, const CustomGroupsPanel(), (Route route) => route.isFirst);
-          },
-          child: SettingsTile(
-            backgroundColor: tileColor,
+        if (!kIsWeb)
+          SearchableSettingItem(
             title: "Custom Groups",
-            activePage: CustomGroupsPanel,
+            searchTags: ["Custom Groups", "Create Group", "Group Chats", "Chat Groups"],
             onTap: () {
               ns.pushAndRemoveSettingsUntil(context, const CustomGroupsPanel(), (Route route) => route.isFirst);
             },
-            leading: const SettingsLeadingIcon(
-              iosIcon: CupertinoIcons.folder_fill,
-              materialIcon: Icons.folder_outlined,
-              containerColor: Colors.orange,
+            child: SettingsTile(
+              backgroundColor: tileColor,
+              title: "Custom Groups",
+              activePage: CustomGroupsPanel,
+              onTap: () {
+                ns.pushAndRemoveSettingsUntil(context, const CustomGroupsPanel(), (Route route) => route.isFirst);
+              },
+              leading: const SettingsLeadingIcon(
+                iosIcon: CupertinoIcons.folder_fill,
+                materialIcon: Icons.folder_outlined,
+                containerColor: Colors.orange,
+              ),
+              trailing: const NextButton(),
             ),
-            trailing: const NextButton(),
           ),
-        ),
 
         if (kIsDesktop)
           // Desktop Settings Tile

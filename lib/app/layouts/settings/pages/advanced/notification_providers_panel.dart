@@ -7,6 +7,7 @@ import 'package:bluebubbles/app/layouts/settings/widgets/settings_widgets.dart';
 import 'package:bluebubbles/helpers/helpers.dart';
 import 'package:bluebubbles/services/services.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -98,8 +99,8 @@ class _NotificationProvidersState extends State<NotificationProvidersPanel> with
                                               width: 33, fit: BoxFit.contain)))))))
                     ]),
                     trailing: const NextButton()),
-                if (Platform.isAndroid) const SettingsDivider(),
-                if (Platform.isAndroid)
+                if (!kIsWeb && Platform.isAndroid) const SettingsDivider(),
+                if (!kIsWeb && Platform.isAndroid)
                   Obx(() => SettingsSwitch(
                         onChanged: (bool val) async {
                           SettingsSvc.settings.keepAppAlive.value = val;
