@@ -719,6 +719,60 @@ neither is web-specific — worth knowing about if this area is touched again:
   of `false`, so its `onPointerSignal` handler is inert and wheel events pass straight through to
   the `Scrollable`. It is not in the path for this.
 
+### Pinned chats rendered twice — fixed and verified live (affects ALL platforms)
+(Reported by the user: a pinned conversation showing as two identical tiles in the iOS-skin
+pinned grid.)
+
+**Not web-only.** The bug is in `ChatsService._initInternal` (`lib/services/ui/chat/chats_service.dart`),
+which is shared code. Web just makes the window enormous — the chat list loads over HTTP in
+100-chat batches (~10s for 197 chats here) instead of from a local ObjectBox query.
+
+Root cause: `_sortedChats` is supposed to hold exactly one entry per chat GUID (the conversation
+list builds its tiles straight from it, and `getFilteredChats(pinnedOnly:)` / `(excludePinned:)`
+partition it), but the batch loop in `_initInternal` inserted unconditionally:
+
+```dart
+final state = chatStates[c.guid] = ChatState(c);   // clobbers any existing state
+_setupChatStateListeners(state);
+_insertChatSorted(c);                              // second entry for the same GUID
+```
+
+`ChatsSvc.addChat()` guards against re-adding an existing chat; this loop did not. And two other
+producers call `addChat` for chats that have no `ChatState` yet — `IncomingMessageHandler`
+(socket) and `IncrementalSyncManager` — both of which run **concurrently with the initial load on
+every web startup**. Console timestamps from a plain launch:
+
+```
+02:16:48.520 [ChatBloc]    Fetching chats...
+02:16:49.038 [Incremental Chat Sync] Starting incremental chat sync...
+02:16:50.942 [SyncManager] Incremental Sync has completed          <- 9s before the chats finish
+02:17:00.225 [ChatBloc]    Finished fetching chats (197).
+```
+
+So any chat the sync (or an incoming message) touches before the batch loop reaches it gets added
+once by `addChat` and then a **second** time by the loop. Because `ChatState.chat` is `final`, the
+overwrite also orphans the `ChatState` the UI is already bound to and registers its unread
+listener twice. Duplicates are invisible in a 197-row list but glaring in the pinned grid, which
+is why the symptom reads as "pinned chats show up twice".
+
+Reproducing it on demand: rewind the sync markers in `localStorage` (`lastIncrementalSyncRowId`,
+`lastIncrementalSync`) so the startup sync actually finds messages, and widen the window with a
+temporary `if (kIsWeb) await Future.delayed(const Duration(seconds: 20));` before the batch loop in
+`_initInternal` so the sync lands first. Without the delay the interleaving is real but luck —
+five plain reloads never hit it, since the sync usually finishes a second *after* the load.
+
+Fix (both in `chats_service.dart`):
+- The batch loop now checks `chatStates[c.guid]` first and calls `updateChat(c, override: true)`
+  for an already-registered chat instead of re-registering and re-inserting it. It logs a
+  one-line `[ChatBloc] Batch N: X chat(s) were already registered mid-load` when that happens, so
+  the race is visible in the console rather than silent.
+- `_insertChatSorted` now enforces the one-entry-per-GUID invariant directly: an insert for a GUID
+  already present replaces it and logs a warning naming the offending caller.
+
+**Verified live** with the widened window: pre-fix, "Fam Chat" rendered as two identical tiles and
+the pinned grid grew to two pages; post-fix the same run logged `Batch 0: 5 chat(s) were already
+registered mid-load` / `Batch 1: 3 chat(s)...` and rendered each pinned chat exactly once.
+
 ## Suggested order to keep working
 
 1. ~~Verify the chat-list sort fix live, commit, push.~~ Done.

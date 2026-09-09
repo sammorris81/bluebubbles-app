@@ -350,19 +350,41 @@ class ChatsService {
 
       // Insert each chat at the correct position using binary search
       // This maintains proper ordering including pinIndex which DB queries cannot handle
+      int preRegistered = 0;
       for (Chat c in chatBatch) {
-        // Create ChatState and add to map
-        final state = chatStates[c.guid] = ChatState(c);
-        _setupChatStateListeners(state);
+        // A chat can already be registered by the time this loop reaches it: the load is
+        // batched and awaits an HTTP/DB round trip per batch, and an incoming socket
+        // message or an incremental sync calls addChat for any chat not yet loaded.
+        // Blindly re-registering it would orphan the live ChatState the UI is already
+        // bound to (it's final on ChatState, so widgets keep the old instance), register
+        // its listeners a second time, and leave a *second* copy of the chat in
+        // _sortedChats — which renders the chat twice, most visibly in the iOS-skin
+        // pinned grid, since that lays its tiles out straight from this list.
+        final existing = chatStates[c.guid];
+        if (existing != null) {
+          preRegistered++;
+          updateChat(c, override: true, immediate: false);
+        } else {
+          final state = chatStates[c.guid] = ChatState(c);
+          _setupChatStateListeners(state);
+
+          // Add to sorted list
+          _insertChatSorted(c);
+        }
 
         if (activeChatGuid.value == c.guid) {
+          final state = chatStates[c.guid]!;
           _activeChat = state;
           state.updateActiveAndAliveInternal(true);
         }
-
-        // Add to sorted list
-        _insertChatSorted(c);
       }
+      if (preRegistered > 0) {
+        Logger.info(
+            "Batch $i: $preRegistered chat(s) were already registered mid-load (added concurrently by an "
+            "incremental sync or an incoming message) - updated in place instead of re-adding",
+            tag: "ChatBloc");
+      }
+
       loadedFirstChatBatch.value = true;
       // Increment chatListVersion after every batch so the UI rebuilds for each batch,
       // not just the first. loadedFirstChatBatch only fires once (false→true), so
@@ -675,7 +697,18 @@ class ChatsService {
   }
 
   /// Insert a chat into the sorted list at the correct position
+  ///
+  /// [_sortedChats] must hold at most one entry per chat GUID — the conversation list
+  /// builds its tiles straight from this list, so a second entry renders the chat twice.
+  /// Anything that lands here with a GUID already present replaces it rather than
+  /// duplicating it; the warning marks the caller that broke the invariant.
   void _insertChatSorted(Chat chat) {
+    final existingIndex = _sortedChats.indexWhere((c) => c.guid == chat.guid);
+    if (existingIndex != -1) {
+      Logger.warn("Chat ${chat.guid} is already in the sorted list - replacing it", tag: "ChatBloc");
+      _sortedChats.removeAt(existingIndex);
+    }
+
     final index = _findInsertionIndex(chat);
     _sortedChats.insert(index, chat);
   }
