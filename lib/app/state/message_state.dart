@@ -195,9 +195,13 @@ class MessageState extends StatefulController {
         attachmentStates[attachment.guid!] = AttachmentState(attachment);
       }
     }
-    // Resolve sender HandleState for incoming messages.
-    if (message.isFromMe != true && message.handleRelation.target != null && !kIsWeb) {
-      sender = HandleSvc.getOrCreateHandleState(message.handleRelation.target!);
+    // Resolve sender HandleState for incoming messages. Without it, senderDisplayName falls back to
+    // "You", which labels every group message as yours. On web, prefer the chat list's in-memory
+    // participant handle (getHandle) over the copy embedded in the message payload: it's the one
+    // the contact sync attaches contacts to, so the sender shows a contact name, not a number.
+    if (message.isFromMe != true) {
+      final handle = kIsWeb ? (message.getHandle() ?? message.handleRelation.target) : message.handleRelation.target;
+      if (handle != null) sender = HandleSvc.getOrCreateHandleState(handle);
     }
   }
 

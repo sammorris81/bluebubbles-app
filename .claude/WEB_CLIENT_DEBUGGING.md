@@ -800,6 +800,24 @@ after `Registering BaseLogger...`, so `[ChatBloc]`/`[ContactServiceV2]` lines yo
 load order in the debug build aren't available. Diagnose from `localStorage`, network requests, and
 screenshots instead — or reproduce in the debug build.
 
+### Every group message labelled "You" — fixed and verified live
+Reported by the user: in group chats on web, every message's sender label read "You" instead of
+the person who sent it.
+
+Root cause: `MessageState`'s constructor (`lib/app/state/message_state.dart`) resolved the sender
+`HandleState` only when `!kIsWeb`, so `sender` was always null on web, and `senderDisplayName`
+returns `'You'` whenever `isFromMe || sender == null`. The guard dates from upstream's original
+handle-state commit (`0f52ffe0f`), when web handles had no `id` and `getOrCreateHandleState` could
+only return uncached, contact-less ephemeral states — the originalROWID fix in `Handle.fromMap`
+(see "Contacts not loading" above) removed that reason. The message payload already carries the
+sender (`ChatsService.getMessages` defaults `withHandle: true`), so the data was there all along.
+
+Fix: resolve the sender on web too, preferring `message.getHandle()` — the chat list's in-memory
+participant handle from `webCachedHandles`, which is the object the contact sync attaches
+contacts to — and falling back to the handle embedded in the payload. Native is unchanged.
+**Verified** in "Fam Chat": messages now show "Kathleen Creaghan", "Janice Morris", "Lisa Martin"
+with their avatars.
+
 ## Suggested order to keep working
 
 1. ~~Verify the chat-list sort fix live, commit, push.~~ Done.
