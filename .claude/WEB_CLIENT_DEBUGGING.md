@@ -818,6 +818,29 @@ contacts to — and falling back to the handle embedded in the payload. Native i
 **Verified** in "Fam Chat": messages now show "Kathleen Creaghan", "Janice Morris", "Lisa Martin"
 with their avatars.
 
+### Settings switches stop responding after the first toggle — fixed and verified live
+Reported by the user on the Chat List settings page: toggle one switch and the rest won't move.
+The values *were* saved (a reload showed them correctly) — only the UI had gone dead.
+
+Root cause: every settings save syncs the GlobalIsolate's copy of the settings —
+`saveOneAsync` → `PrefsInterface.syncSettings` → `PrefsActions.syncSettings` → `Settings.updateFromMap`,
+whose tail calls `PrefsInterface.syncAllSettings` → `PrefsActions.syncAllSettings`, which does
+`SettingsSvc.settings = Settings.fromMap(...)`. On native that runs inside the isolate, replacing only
+the isolate's copy. On web there is no isolate: `isIsolate` is always false and `GlobalIsolate.send`
+runs the action on the main thread, so it **replaced the live settings object**. Every `Obx` and
+`ever()` bound to the old object's `Rx` fields was orphaned — the settings page's switches, plus ~17
+long-lived listeners in the chat, message and handle services — until the next page load.
+
+Fix: `PrefsInterface.syncSettings`/`syncAllSettings` are no-ops on web
+(`lib/services/backend/interfaces/prefs_interface.dart`); the main thread's settings are the only copy,
+and the `_savePref` persistence in `saveAsync`/`saveOneAsync`/`saveManyAsync` is unaffected.
+**Verified**: four consecutive toggles (Hide Dividers / Dense Conversation Tiles on, then off) each
+flipped on screen, vs. the second toggle sticking before the fix; storage matched.
+
+Testing gotcha: when the Chrome window is covered or minimised, `document.visibilityState` is
+`"hidden"` and Chrome stops producing frames — Flutter menus freeze mid-animation and clicks can't be
+checked visually. Check visibility before trusting a "nothing happened" screenshot.
+
 ## Suggested order to keep working
 
 1. ~~Verify the chat-list sort fix live, commit, push.~~ Done.
