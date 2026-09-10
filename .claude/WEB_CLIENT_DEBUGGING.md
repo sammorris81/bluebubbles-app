@@ -773,6 +773,33 @@ Fix (both in `chats_service.dart`):
 the pinned grid grew to two pages; post-fix the same run logged `Batch 0: 5 chat(s) were already
 registered mid-load` / `Batch 1: 3 chat(s)...` and rendered each pinned chat exactly once.
 
+### 1:1 chats missing from the list on some loads — fixed and verified live (release build)
+Found while smoke-testing a `flutter build web --release` build (served as static files from
+`build/web/` at `http://10.7.12.13:8090/web/`, the same origin as the dev server, so the saved
+server login carries over). On 3 of 5 reloads the conversation list showed **only group chats**,
+sorted correctly, with every 1:1 chat gone — including the pinned self-chat — and it never
+recovered on its own.
+
+Root cause: the account has **Filter Unknown Senders** on (`filterUnknownSenders` in
+`localStorage`). `ChatsService.getFilteredChats` then hides any 1:1 chat whose handle has no
+`contactsV2`, and the list only re-filters on a `chatListVersion` bump. On web the contacts are
+attached by the *second* contact sync, fired at the end of `_initInternal` — after the chat
+load's last version bump. Native's `notifyHandlesUpdated` finishes with `_updateChatsForHandles`,
+which calls `updateChat` and bumps the version; the web path, `_notifyHandlesUpdatedWeb`
+(`lib/services/ui/contact_service_v2.dart`), only updated `HandleState`s — enough for titles
+(they're reactive on `displayName`), not for the list filter. Whether you saw 1:1 chats came down
+to whether the contact match beat the final debounced bump. Group titles still resolved in the
+bad state, which is what made it look like a sorting/loading bug rather than a filter.
+
+Fix: added `ChatsService.notifyChatListChanged()` (a public, debounced `chatListVersion` bump that
+doesn't re-sort) and call it from `_notifyHandlesUpdatedWeb` after updating the handle states.
+**Verified**: 5/5 reloads of a fresh release build showed the full list, vs. 3/5 failing before.
+
+Release-build gotcha found along the way: app logs stop appearing in the browser console right
+after `Registering BaseLogger...`, so `[ChatBloc]`/`[ContactServiceV2]` lines you'd use to trace
+load order in the debug build aren't available. Diagnose from `localStorage`, network requests, and
+screenshots instead — or reproduce in the debug build.
+
 ## Suggested order to keep working
 
 1. ~~Verify the chat-list sort fix live, commit, push.~~ Done.

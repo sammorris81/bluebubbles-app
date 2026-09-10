@@ -610,6 +610,13 @@ class ChatsService {
     }
   }
 
+  /// Ask the chat list UI to rebuild (debounced) without re-sorting.
+  ///
+  /// For changes that affect which chats [getFilteredChats] returns but not their
+  /// order — e.g. contacts being attached to handles, which moves 1:1 chats in or
+  /// out of the unknown-senders filter.
+  void notifyChatListChanged() => _scheduleListVersionUpdate();
+
   /// Re-sort [_sortedChats] in-place and notify the chat list UI.
   ///
   /// Call this after bulk pin-index changes that were applied outside of the
