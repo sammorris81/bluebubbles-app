@@ -642,6 +642,9 @@ List<Widget> buildSettingItemList({
             "Disable Battery Optimizations",
             "Clear Last Opened Chat",
             "Sync Chat Info",
+            "Cache Tuning",
+            "Memory",
+            "Purge Caches",
           ], // Tags to search
           onTap: () async {
             ns.pushAndRemoveSettingsUntil(context, const TroubleshootPanel(), (Route route) => route.isFirst);

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:universal_io/io.dart';
 
+import 'package:bluebubbles/env.dart';
 import 'package:bluebubbles/helpers/backend/startup_tasks.dart';
 import 'package:bluebubbles/helpers/helpers.dart';
 import 'package:bluebubbles/database/models.dart';
@@ -75,7 +76,8 @@ class Database {
       Logger.info(
           "Database init: SettingsSvc.finishedSetup = $setupFinished, PrefsSvc.finishedSetup = $setupFinished2");
 
-      if (!setupFinished) {
+      // Setup only ever runs on main, so only main may act on an unfinished one.
+      if (!setupFinished && !isIsolate) {
         Logger.warn("Clearing database because setup is not finished...");
 
         Database.attachments.removeAll();
@@ -162,11 +164,6 @@ class Database {
       if (e.toString().contains("another store is still open using the same path")) {
         Logger.debug("Retrying to attach to an existing ObjectBox store");
         store = Store.attach(getObjectBoxModel(), objectBoxDirectory.path);
-      } else if (Platform.isLinux) {
-        Logger.debug("Another instance is probably running. Sending foreground signal");
-        final instanceFile = File(join(FilesystemSvc.appDocDir.path, '.instance'));
-        instanceFile.openSync(mode: FileMode.write).closeSync();
-        exit(0);
       }
     }
   }
