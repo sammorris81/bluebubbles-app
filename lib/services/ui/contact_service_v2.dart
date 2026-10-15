@@ -323,6 +323,13 @@ class ContactServiceV2 {
   /// and `ChatState` already listens on that (`ever(hs.displayName, ...)`) to
   /// recompute its title and creator subtitle — so chat tiles refresh reactively
   /// without the DB-backed `_updateChatsForHandles` pass.
+  ///
+  /// The chat *list* still needs an explicit nudge, though: with Filter Unknown
+  /// Senders on, `getFilteredChats` hides 1:1 chats whose handle has no contact,
+  /// and it only re-runs on a `chatListVersion` bump. Native gets that bump from
+  /// `_updateChatsForHandles`; without it here, a contact sync that lands after
+  /// the chat load's last bump leaves every 1:1 chat hidden until something else
+  /// happens to rebuild the list.
   void _notifyHandlesUpdatedWeb(List<int> handleIds) {
     if (!GetIt.I.isRegistered<ChatsService>()) return;
 
@@ -339,6 +346,7 @@ class ContactServiceV2 {
 
     if (refreshed.isEmpty) return;
     HandleSvc.updateHandleStates(refreshed.values.toList());
+    ChatsSvc.notifyChatListChanged();
     Logger.info('[ContactServiceV2] Refreshed ${refreshed.length} web handle states after contact sync');
   }
 

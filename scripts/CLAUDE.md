@@ -9,6 +9,29 @@ bash scripts/dart-fix-common-issues.sh
 
 Run this after making broad changes or before committing if the linter is reporting auto-fixable issues.
 
+## gen_web_icons.dart
+Regenerates the PWA icons in `web/icons/` from the source art in `assets/icon/`.
+
+```bash
+dart run scripts/gen_web_icons.dart
+```
+
+| Output | Source | Purpose |
+|---|---|---|
+| `Icon-192.png`, `Icon-512.png` | `assets/icon/icon.png`, resized | `"any"` — drawn as-is, keeps its transparent surround |
+| `Icon-maskable-192.png`, `Icon-maskable-512.png` | `assets/icon/adaptive-foreground.png` centre-cropped to the adaptive icon's visible 72/108 and composited over `#4990de` | `"maskable"` — full-bleed, so the OS can crop it to a circle/squircle |
+
+192 and 512 are the two sizes Chrome requires before it will offer to install the app.
+
+Deliberately *not* `flutter_launcher_icons`: its web generator takes a single `image_path`
+and emits both purposes from it, and `icon.png` is a transparent bubble running nearly edge
+to edge — masked, its sides get chopped off. There's no `web:` block in pubspec's
+`flutter_icons:` config for the same reason, so running that tool won't overwrite these.
+
+Re-run it if `assets/icon/icon.png` or `assets/icon/adaptive-foreground.png` changes, or if
+`adaptive_icon_background` in pubspec moves away from `#4990de` (the colour is hardcoded in
+the script and mirrored in `web/manifest.json`'s `theme_color`/`background_color`).
+
 ## bump_desktop_versions.dart
 Sets the 4-digit desktop version in every spot it's hardcoded:
 
