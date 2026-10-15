@@ -719,6 +719,128 @@ neither is web-specific — worth knowing about if this area is touched again:
   of `false`, so its `onPointerSignal` handler is inert and wheel events pass straight through to
   the `Scrollable`. It is not in the path for this.
 
+### Pinned chats rendered twice — fixed and verified live (affects ALL platforms)
+(Reported by the user: a pinned conversation showing as two identical tiles in the iOS-skin
+pinned grid.)
+
+**Not web-only.** The bug is in `ChatsService._initInternal` (`lib/services/ui/chat/chats_service.dart`),
+which is shared code. Web just makes the window enormous — the chat list loads over HTTP in
+100-chat batches (~10s for 197 chats here) instead of from a local ObjectBox query.
+
+Root cause: `_sortedChats` is supposed to hold exactly one entry per chat GUID (the conversation
+list builds its tiles straight from it, and `getFilteredChats(pinnedOnly:)` / `(excludePinned:)`
+partition it), but the batch loop in `_initInternal` inserted unconditionally:
+
+```dart
+final state = chatStates[c.guid] = ChatState(c);   // clobbers any existing state
+_setupChatStateListeners(state);
+_insertChatSorted(c);                              // second entry for the same GUID
+```
+
+`ChatsSvc.addChat()` guards against re-adding an existing chat; this loop did not. And two other
+producers call `addChat` for chats that have no `ChatState` yet — `IncomingMessageHandler`
+(socket) and `IncrementalSyncManager` — both of which run **concurrently with the initial load on
+every web startup**. Console timestamps from a plain launch:
+
+```
+02:16:48.520 [ChatBloc]    Fetching chats...
+02:16:49.038 [Incremental Chat Sync] Starting incremental chat sync...
+02:16:50.942 [SyncManager] Incremental Sync has completed          <- 9s before the chats finish
+02:17:00.225 [ChatBloc]    Finished fetching chats (197).
+```
+
+So any chat the sync (or an incoming message) touches before the batch loop reaches it gets added
+once by `addChat` and then a **second** time by the loop. Because `ChatState.chat` is `final`, the
+overwrite also orphans the `ChatState` the UI is already bound to and registers its unread
+listener twice. Duplicates are invisible in a 197-row list but glaring in the pinned grid, which
+is why the symptom reads as "pinned chats show up twice".
+
+Reproducing it on demand: rewind the sync markers in `localStorage` (`lastIncrementalSyncRowId`,
+`lastIncrementalSync`) so the startup sync actually finds messages, and widen the window with a
+temporary `if (kIsWeb) await Future.delayed(const Duration(seconds: 20));` before the batch loop in
+`_initInternal` so the sync lands first. Without the delay the interleaving is real but luck —
+five plain reloads never hit it, since the sync usually finishes a second *after* the load.
+
+Fix (both in `chats_service.dart`):
+- The batch loop now checks `chatStates[c.guid]` first and calls `updateChat(c, override: true)`
+  for an already-registered chat instead of re-registering and re-inserting it. It logs a
+  one-line `[ChatBloc] Batch N: X chat(s) were already registered mid-load` when that happens, so
+  the race is visible in the console rather than silent.
+- `_insertChatSorted` now enforces the one-entry-per-GUID invariant directly: an insert for a GUID
+  already present replaces it and logs a warning naming the offending caller.
+
+**Verified live** with the widened window: pre-fix, "Fam Chat" rendered as two identical tiles and
+the pinned grid grew to two pages; post-fix the same run logged `Batch 0: 5 chat(s) were already
+registered mid-load` / `Batch 1: 3 chat(s)...` and rendered each pinned chat exactly once.
+
+### 1:1 chats missing from the list on some loads — fixed and verified live (release build)
+Found while smoke-testing a `flutter build web --release` build (served as static files from
+`build/web/` at `http://10.7.12.13:8090/web/`, the same origin as the dev server, so the saved
+server login carries over). On 3 of 5 reloads the conversation list showed **only group chats**,
+sorted correctly, with every 1:1 chat gone — including the pinned self-chat — and it never
+recovered on its own.
+
+Root cause: the account has **Filter Unknown Senders** on (`filterUnknownSenders` in
+`localStorage`). `ChatsService.getFilteredChats` then hides any 1:1 chat whose handle has no
+`contactsV2`, and the list only re-filters on a `chatListVersion` bump. On web the contacts are
+attached by the *second* contact sync, fired at the end of `_initInternal` — after the chat
+load's last version bump. Native's `notifyHandlesUpdated` finishes with `_updateChatsForHandles`,
+which calls `updateChat` and bumps the version; the web path, `_notifyHandlesUpdatedWeb`
+(`lib/services/ui/contact_service_v2.dart`), only updated `HandleState`s — enough for titles
+(they're reactive on `displayName`), not for the list filter. Whether you saw 1:1 chats came down
+to whether the contact match beat the final debounced bump. Group titles still resolved in the
+bad state, which is what made it look like a sorting/loading bug rather than a filter.
+
+Fix: added `ChatsService.notifyChatListChanged()` (a public, debounced `chatListVersion` bump that
+doesn't re-sort) and call it from `_notifyHandlesUpdatedWeb` after updating the handle states.
+**Verified**: 5/5 reloads of a fresh release build showed the full list, vs. 3/5 failing before.
+
+Release-build gotcha found along the way: app logs stop appearing in the browser console right
+after `Registering BaseLogger...`, so `[ChatBloc]`/`[ContactServiceV2]` lines you'd use to trace
+load order in the debug build aren't available. Diagnose from `localStorage`, network requests, and
+screenshots instead — or reproduce in the debug build.
+
+### Every group message labelled "You" — fixed and verified live
+Reported by the user: in group chats on web, every message's sender label read "You" instead of
+the person who sent it.
+
+Root cause: `MessageState`'s constructor (`lib/app/state/message_state.dart`) resolved the sender
+`HandleState` only when `!kIsWeb`, so `sender` was always null on web, and `senderDisplayName`
+returns `'You'` whenever `isFromMe || sender == null`. The guard dates from upstream's original
+handle-state commit (`0f52ffe0f`), when web handles had no `id` and `getOrCreateHandleState` could
+only return uncached, contact-less ephemeral states — the originalROWID fix in `Handle.fromMap`
+(see "Contacts not loading" above) removed that reason. The message payload already carries the
+sender (`ChatsService.getMessages` defaults `withHandle: true`), so the data was there all along.
+
+Fix: resolve the sender on web too, preferring `message.getHandle()` — the chat list's in-memory
+participant handle from `webCachedHandles`, which is the object the contact sync attaches
+contacts to — and falling back to the handle embedded in the payload. Native is unchanged.
+**Verified** in "Fam Chat": messages now show "Kathleen Creaghan", "Janice Morris", "Lisa Martin"
+with their avatars.
+
+### Settings switches stop responding after the first toggle — fixed and verified live
+Reported by the user on the Chat List settings page: toggle one switch and the rest won't move.
+The values *were* saved (a reload showed them correctly) — only the UI had gone dead.
+
+Root cause: every settings save syncs the GlobalIsolate's copy of the settings —
+`saveOneAsync` → `PrefsInterface.syncSettings` → `PrefsActions.syncSettings` → `Settings.updateFromMap`,
+whose tail calls `PrefsInterface.syncAllSettings` → `PrefsActions.syncAllSettings`, which does
+`SettingsSvc.settings = Settings.fromMap(...)`. On native that runs inside the isolate, replacing only
+the isolate's copy. On web there is no isolate: `isIsolate` is always false and `GlobalIsolate.send`
+runs the action on the main thread, so it **replaced the live settings object**. Every `Obx` and
+`ever()` bound to the old object's `Rx` fields was orphaned — the settings page's switches, plus ~17
+long-lived listeners in the chat, message and handle services — until the next page load.
+
+Fix: `PrefsInterface.syncSettings`/`syncAllSettings` are no-ops on web
+(`lib/services/backend/interfaces/prefs_interface.dart`); the main thread's settings are the only copy,
+and the `_savePref` persistence in `saveAsync`/`saveOneAsync`/`saveManyAsync` is unaffected.
+**Verified**: four consecutive toggles (Hide Dividers / Dense Conversation Tiles on, then off) each
+flipped on screen, vs. the second toggle sticking before the fix; storage matched.
+
+Testing gotcha: when the Chrome window is covered or minimised, `document.visibilityState` is
+`"hidden"` and Chrome stops producing frames — Flutter menus freeze mid-animation and clicks can't be
+checked visually. Check visibility before trusting a "nothing happened" screenshot.
+
 ## Suggested order to keep working
 
 1. ~~Verify the chat-list sort fix live, commit, push.~~ Done.
