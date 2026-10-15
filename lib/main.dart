@@ -159,14 +159,16 @@ Future<Null> initApp(bool bubble, List<String> arguments) async {
             )));
       }
 
-      /* ----- ANDROID SPECIFIC INITIALIZATION ----- */
-      if (!kIsWeb && !kIsDesktop) {
-        /* ----- TIME ZONE INITIALIZATION ----- */
+      /* ----- TIME ZONE INITIALIZATION ----- */
+      if (!kIsWeb) {
         tz.initializeTimeZones();
         try {
           tz.setLocalLocation(tz.getLocation((await FlutterTimezone.getLocalTimezone()).identifier));
         } catch (_) {}
+      }
 
+      /* ----- ANDROID SPECIFIC INITIALIZATION ----- */
+      if (!kIsWeb && !kIsDesktop) {
         /* ----- MLKIT INITIALIZATION ----- */
         // Defer MLKit model check - not critical for startup
         Future.microtask(() async {
@@ -645,6 +647,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver, TrayListener {
         await windowManager.hide();
         break;
       case 'close_app':
+        if (Platform.isLinux) exit(0);
         await windowManager.setPreventClose(false);
         await windowManager.close();
         break;
