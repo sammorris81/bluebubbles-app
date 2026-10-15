@@ -279,6 +279,7 @@ class ChatActions {
           if (chatHandles.length == 1) {
             handleToLink = chatHandles.first;
             Logger.warn(
+              // ignore: unnecessary_non_null_assertion
               'Linked message ${inputMessage.guid} to sole participant ${handleToLink!.address} '
               '(originalROWID lookup for handleId=${inputMessage.handleId} failed)',
               tag: 'ChatActions',

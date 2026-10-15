@@ -93,6 +93,7 @@ class MessageHandleRelationshipMigration {
           Database.messages.putMany(messagesToUpdate);
         }
 
+        // ignore: unnecessary_cast
         processed += batch.length as int;
 
         // Per batch

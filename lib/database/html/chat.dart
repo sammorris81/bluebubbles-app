@@ -542,7 +542,8 @@ class Chat {
       serverSyncParticipants();
     }
 
-    return MessageSaveResult(newMessage ?? message, isNewer);
+    // MessageSaveResult's Message resolves to the io model under analysis; on web it's this html model.
+    return MessageSaveResult((newMessage ?? message) as dynamic, isNewer);
   }
 
   void serverSyncParticipants() async {
