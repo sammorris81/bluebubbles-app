@@ -60,6 +60,7 @@ class ChatLatestMessageMigration {
         chatBox.putMany(chatsToUpdate);
       }
 
+      // ignore: unnecessary_cast
       processed += batch.length as int;
       // the await is what gets this to the splash while the migration owns the isolate.
       await StartupTasks.setSplashProgress(processed / totalChats);
