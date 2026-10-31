@@ -242,6 +242,10 @@ class Message {
     return this;
   }
 
+  Future<Message> saveAsync({Chat? chat, bool updateIsBookmarked = false}) async {
+    return this;
+  }
+
   static Future<List<Message>> bulkSaveNewMessages(Chat chat, List<Message> messages) async {
     for (Message m in messages) {
       // Save the participant & set the handle ID to the new participant

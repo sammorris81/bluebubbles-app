@@ -9,6 +9,13 @@ Future<void> configureNetworkTools(
   bool rebuildData = false,
 }) async {}
 
+/// network_info_plus only exposes this on Windows. Reached from a `!kIsWeb` branch, so it just has to compile.
+class NetworkInfoPlusWindowsPlugin {
+  Future<String?> getWifiIP() async => null;
+
+  void closeHandle() {}
+}
+
 class ActiveHost {
   String address = "";
 }
