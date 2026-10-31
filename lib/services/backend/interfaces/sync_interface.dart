@@ -56,6 +56,10 @@ class SyncInterface {
   /// Returns the latest [Message] object per synced chat, hydrated from the local DB.
   /// Callers use these messages to update [ChatState] subtitles via [ChatsService].
   static Future<List<Message>> performIncrementalSync({bool useGlobalIsolate = false}) async {
+    // No local DB to sync into on web (the sync would throw a LateInitializationError on Database.messages), and
+    // nothing to catch up on: chats and messages are loaded straight from the server.
+    if (kIsWeb) return [];
+
     late List<int> messageIds = [];
     if (isIsolate) {
       messageIds = await SyncActions.performIncrementalSync({});

@@ -267,6 +267,9 @@ background sync code that isn't `kIsWeb`-guarded the way the contacts sync now i
 dedicated session; did not chase this further since it's outside today's attachment-focused
 scope.
 
+The `Incremental Chat Sync` part is now fixed: `SyncInterface.performIncrementalSync` returns early
+on web, which also stops the "Sync failed. Check your connection." toast it caused on load.
+
 ### Group chat titles not resolving to contact names — fixed and verified live (affects ALL platforms)
 (Follow-up to the contacts fix below. Reported by the user: `+16087990697` and
 `+19204122065` — the second participant in two different group chats — never
